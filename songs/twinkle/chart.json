@@ -1,0 +1,766 @@
+{
+ "id": "twinkle",
+ "title": "Twinkle, Twinkle, Little Star",
+ "credit": "Traditional \u00b7 words by Jane Taylor, 1806",
+ "bpm": 92,
+ "beatsPerBar": 4,
+ "duration": 77.152,
+ "lines": [
+  {
+   "start": 5.2174,
+   "end": 10.4347,
+   "text": "Twinkle, twinkle, little star,",
+   "notes": [
+    {
+     "t": 5.2174,
+     "d": 0.6522,
+     "p": 60,
+     "syl": "Twin",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 5.8696,
+     "d": 0.6522,
+     "p": 60,
+     "syl": "kle,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 6.5217,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "twin",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 7.1739,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "kle,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 7.8261,
+     "d": 0.6522,
+     "p": 69,
+     "syl": "lit",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 8.4783,
+     "d": 0.6522,
+     "p": 69,
+     "syl": "tle",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 9.1304,
+     "d": 1.3043,
+     "p": 67,
+     "syl": "star,",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 10.4348,
+   "end": 15.6521,
+   "text": "How I wonder what you are.",
+   "notes": [
+    {
+     "t": 10.4348,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "How",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 11.087,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "I",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 11.7391,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "won",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 12.3913,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "der",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 13.0435,
+     "d": 0.6522,
+     "p": 62,
+     "syl": "what",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 13.6957,
+     "d": 0.6522,
+     "p": 62,
+     "syl": "you",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 14.3478,
+     "d": 1.3043,
+     "p": 60,
+     "syl": "are.",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 15.6522,
+   "end": 20.8695,
+   "text": "Up above the world so high,",
+   "notes": [
+    {
+     "t": 15.6522,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "Up",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 16.3043,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "a",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 16.9565,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "bove",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 17.6087,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "the",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 18.2609,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "world",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 18.913,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "so",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 19.5652,
+     "d": 1.3043,
+     "p": 62,
+     "syl": "high,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 20.8696,
+   "end": 26.0869,
+   "text": "Like a diamond in the sky.",
+   "notes": [
+    {
+     "t": 20.8696,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "Like",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 21.5217,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "a",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 22.1739,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "dia",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 22.8261,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "mond",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 23.4783,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "in",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 24.1304,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "the",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 24.7826,
+     "d": 1.3043,
+     "p": 62,
+     "syl": "sky.",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 26.087,
+   "end": 31.3043,
+   "text": "Twinkle, twinkle, little star,",
+   "notes": [
+    {
+     "t": 26.087,
+     "d": 0.6522,
+     "p": 60,
+     "syl": "Twin",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 26.7391,
+     "d": 0.6522,
+     "p": 60,
+     "syl": "kle,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 27.3913,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "twin",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 28.0435,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "kle,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 28.6957,
+     "d": 0.6522,
+     "p": 69,
+     "syl": "lit",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 29.3478,
+     "d": 0.6522,
+     "p": 69,
+     "syl": "tle",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 30.0,
+     "d": 1.3043,
+     "p": 67,
+     "syl": "star,",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 31.3043,
+   "end": 36.5217,
+   "text": "How I wonder what you are.",
+   "notes": [
+    {
+     "t": 31.3043,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "How",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 31.9565,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "I",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 32.6087,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "won",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 33.2609,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "der",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 33.913,
+     "d": 0.6522,
+     "p": 62,
+     "syl": "what",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 34.5652,
+     "d": 0.6522,
+     "p": 62,
+     "syl": "you",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 35.2174,
+     "d": 1.3043,
+     "p": 60,
+     "syl": "are.",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 41.7391,
+   "end": 46.9565,
+   "text": "When the blazing sun is gone,",
+   "notes": [
+    {
+     "t": 41.7391,
+     "d": 0.6522,
+     "p": 60,
+     "syl": "When",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 42.3913,
+     "d": 0.6522,
+     "p": 60,
+     "syl": "the",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 43.0435,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "bla",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 43.6957,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "zing",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 44.3478,
+     "d": 0.6522,
+     "p": 69,
+     "syl": "sun",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 45.0,
+     "d": 0.6522,
+     "p": 69,
+     "syl": "is",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 45.6522,
+     "d": 1.3043,
+     "p": 67,
+     "syl": "gone,",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 46.9565,
+   "end": 52.1739,
+   "text": "When he nothing shines upon,",
+   "notes": [
+    {
+     "t": 46.9565,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "When",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 47.6087,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "he",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 48.2609,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "no",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 48.913,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "thing",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 49.5652,
+     "d": 0.6522,
+     "p": 62,
+     "syl": "shines",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 50.2174,
+     "d": 0.6522,
+     "p": 62,
+     "syl": "up",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 50.8696,
+     "d": 1.3043,
+     "p": 60,
+     "syl": "on,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 52.1739,
+   "end": 57.3913,
+   "text": "Then you show your little light,",
+   "notes": [
+    {
+     "t": 52.1739,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "Then",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 52.8261,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "you",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 53.4783,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "show",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 54.1304,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "your",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 54.7826,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "lit",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 55.4348,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "tle",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 56.087,
+     "d": 1.3043,
+     "p": 62,
+     "syl": "light,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 57.3913,
+   "end": 62.6086,
+   "text": "Twinkle, twinkle, all the night.",
+   "notes": [
+    {
+     "t": 57.3913,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "Twin",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 58.0435,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "kle,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 58.6957,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "twin",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 59.3478,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "kle,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 60.0,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "all",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 60.6522,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "the",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 61.3043,
+     "d": 1.3043,
+     "p": 62,
+     "syl": "night.",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 62.6087,
+   "end": 67.826,
+   "text": "Twinkle, twinkle, little star,",
+   "notes": [
+    {
+     "t": 62.6087,
+     "d": 0.6522,
+     "p": 60,
+     "syl": "Twin",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 63.2609,
+     "d": 0.6522,
+     "p": 60,
+     "syl": "kle,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 63.913,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "twin",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 64.5652,
+     "d": 0.6522,
+     "p": 67,
+     "syl": "kle,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 65.2174,
+     "d": 0.6522,
+     "p": 69,
+     "syl": "lit",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 65.8696,
+     "d": 0.6522,
+     "p": 69,
+     "syl": "tle",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 66.5217,
+     "d": 1.3043,
+     "p": 67,
+     "syl": "star,",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 67.8261,
+   "end": 73.0434,
+   "text": "How I wonder what you are.",
+   "notes": [
+    {
+     "t": 67.8261,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "How",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 68.4783,
+     "d": 0.6522,
+     "p": 65,
+     "syl": "I",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 69.1304,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "won",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 69.7826,
+     "d": 0.6522,
+     "p": 64,
+     "syl": "der",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 70.4348,
+     "d": 0.6522,
+     "p": 62,
+     "syl": "what",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 71.087,
+     "d": 0.6522,
+     "p": 62,
+     "syl": "you",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 71.7391,
+     "d": 1.3043,
+     "p": 60,
+     "syl": "are.",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  }
+ ]
+}

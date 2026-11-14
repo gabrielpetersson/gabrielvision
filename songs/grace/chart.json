@@ -1,0 +1,578 @@
+{
+ "id": "grace",
+ "title": "Amazing Grace",
+ "credit": "Traditional \u00b7 words by John Newton, 1779",
+ "bpm": 72,
+ "beatsPerBar": 3,
+ "duration": 89.0,
+ "lines": [
+  {
+   "start": 4.1667,
+   "end": 14.1667,
+   "text": "Amazing grace, how sweet the sound",
+   "notes": [
+    {
+     "t": 4.1667,
+     "d": 0.8333,
+     "p": 55,
+     "syl": "A",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 5.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "ma",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 6.6667,
+     "d": 0.4167,
+     "p": 64,
+     "syl": "zing",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 7.0833,
+     "d": 0.4167,
+     "p": 60,
+     "syl": "~",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 7.5,
+     "d": 1.6667,
+     "p": 64,
+     "syl": "grace,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 9.1667,
+     "d": 0.8333,
+     "p": 62,
+     "syl": "how",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 10.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "sweet",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 11.6667,
+     "d": 0.8333,
+     "p": 57,
+     "syl": "the",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 12.5,
+     "d": 1.6667,
+     "p": 55,
+     "syl": "sound",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 14.1667,
+   "end": 22.5,
+   "text": "that saved a wretch like me.",
+   "notes": [
+    {
+     "t": 14.1667,
+     "d": 0.8333,
+     "p": 55,
+     "syl": "that",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 15.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "saved",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 16.6667,
+     "d": 0.4167,
+     "p": 64,
+     "syl": "a",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 17.0833,
+     "d": 0.4167,
+     "p": 60,
+     "syl": "~",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 17.5,
+     "d": 1.6667,
+     "p": 64,
+     "syl": "wretch",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 19.1667,
+     "d": 0.8333,
+     "p": 62,
+     "syl": "like",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 20.0,
+     "d": 2.5,
+     "p": 67,
+     "syl": "me.",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 24.1667,
+   "end": 34.1667,
+   "text": "I once was lost, but now am found,",
+   "notes": [
+    {
+     "t": 24.1667,
+     "d": 0.8333,
+     "p": 64,
+     "syl": "I",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 25.0,
+     "d": 1.6667,
+     "p": 67,
+     "syl": "once",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 26.6667,
+     "d": 0.4167,
+     "p": 64,
+     "syl": "was",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 27.0833,
+     "d": 0.4167,
+     "p": 60,
+     "syl": "~",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 27.5,
+     "d": 1.6667,
+     "p": 64,
+     "syl": "lost,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 29.1667,
+     "d": 0.8333,
+     "p": 62,
+     "syl": "but",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 30.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "now",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 31.6667,
+     "d": 0.8333,
+     "p": 57,
+     "syl": "am",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 32.5,
+     "d": 1.6667,
+     "p": 55,
+     "syl": "found,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 34.1667,
+   "end": 42.5,
+   "text": "was blind, but now I see.",
+   "notes": [
+    {
+     "t": 34.1667,
+     "d": 0.8333,
+     "p": 55,
+     "syl": "was",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 35.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "blind,",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 36.6667,
+     "d": 0.4167,
+     "p": 64,
+     "syl": "but",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 37.0833,
+     "d": 0.4167,
+     "p": 60,
+     "syl": "~",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 37.5,
+     "d": 1.6667,
+     "p": 64,
+     "syl": "now",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 39.1667,
+     "d": 0.8333,
+     "p": 62,
+     "syl": "I",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 40.0,
+     "d": 2.5,
+     "p": 60,
+     "syl": "see.",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 44.1667,
+   "end": 54.1667,
+   "text": "'Twas grace that taught my heart to fear,",
+   "notes": [
+    {
+     "t": 44.1667,
+     "d": 0.8333,
+     "p": 55,
+     "syl": "'Twas",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 45.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "grace",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 46.6667,
+     "d": 0.4167,
+     "p": 64,
+     "syl": "that",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 47.0833,
+     "d": 0.4167,
+     "p": 60,
+     "syl": "~",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 47.5,
+     "d": 1.6667,
+     "p": 64,
+     "syl": "taught",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 49.1667,
+     "d": 0.8333,
+     "p": 62,
+     "syl": "my",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 50.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "heart",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 51.6667,
+     "d": 0.8333,
+     "p": 57,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 52.5,
+     "d": 1.6667,
+     "p": 55,
+     "syl": "fear,",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 54.1667,
+   "end": 62.5,
+   "text": "and grace my fears relieved.",
+   "notes": [
+    {
+     "t": 54.1667,
+     "d": 0.8333,
+     "p": 55,
+     "syl": "and",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 55.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "grace",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 56.6667,
+     "d": 0.4167,
+     "p": 64,
+     "syl": "my",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 57.0833,
+     "d": 0.4167,
+     "p": 60,
+     "syl": "~",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 57.5,
+     "d": 1.6667,
+     "p": 64,
+     "syl": "fears",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 59.1667,
+     "d": 0.8333,
+     "p": 62,
+     "syl": "re",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 60.0,
+     "d": 2.5,
+     "p": 67,
+     "syl": "lieved.",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 64.1667,
+   "end": 74.1667,
+   "text": "How precious did that grace appear",
+   "notes": [
+    {
+     "t": 64.1667,
+     "d": 0.8333,
+     "p": 64,
+     "syl": "How",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 65.0,
+     "d": 1.6667,
+     "p": 67,
+     "syl": "pre",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 66.6667,
+     "d": 0.4167,
+     "p": 64,
+     "syl": "cious",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 67.0833,
+     "d": 0.4167,
+     "p": 60,
+     "syl": "~",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 67.5,
+     "d": 1.6667,
+     "p": 64,
+     "syl": "did",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 69.1667,
+     "d": 0.8333,
+     "p": 62,
+     "syl": "that",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 70.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "grace",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 71.6667,
+     "d": 0.8333,
+     "p": 57,
+     "syl": "ap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 72.5,
+     "d": 1.6667,
+     "p": 55,
+     "syl": "pear",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 74.1667,
+   "end": 85.0,
+   "text": "the hour I first believed.",
+   "notes": [
+    {
+     "t": 74.1667,
+     "d": 0.8333,
+     "p": 55,
+     "syl": "the",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 75.0,
+     "d": 1.6667,
+     "p": 60,
+     "syl": "hour",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 76.6667,
+     "d": 0.4167,
+     "p": 64,
+     "syl": "I",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 77.0833,
+     "d": 0.4167,
+     "p": 60,
+     "syl": "~",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 77.5,
+     "d": 1.6667,
+     "p": 64,
+     "syl": "first",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 79.1667,
+     "d": 0.8333,
+     "p": 62,
+     "syl": "be",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 80.0,
+     "d": 5.0,
+     "p": 60,
+     "syl": "lieved.",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  }
+ ]
+}

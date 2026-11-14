@@ -1,0 +1,718 @@
+{
+ "id": "birthday",
+ "title": "Happy Birthday to You",
+ "credit": "Traditional \u00b7 Mildred and Patty Hill, 1893",
+ "bpm": 104,
+ "beatsPerBar": 3,
+ "duration": 56.885,
+ "lines": [
+  {
+   "start": 6.3462,
+   "end": 9.8076,
+   "text": "Happy birthday to you,",
+   "notes": [
+    {
+     "t": 6.3462,
+     "d": 0.4327,
+     "p": 60,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 6.7788,
+     "d": 0.1442,
+     "p": 60,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 6.9231,
+     "d": 0.5769,
+     "p": 62,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 7.5,
+     "d": 0.5769,
+     "p": 60,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 8.0769,
+     "d": 0.5769,
+     "p": 65,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 8.6538,
+     "d": 1.1538,
+     "p": 64,
+     "syl": "you,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 9.8077,
+   "end": 13.2692,
+   "text": "Happy birthday to you,",
+   "notes": [
+    {
+     "t": 9.8077,
+     "d": 0.4327,
+     "p": 60,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 10.2404,
+     "d": 0.1442,
+     "p": 60,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 10.3846,
+     "d": 0.5769,
+     "p": 62,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 10.9615,
+     "d": 0.5769,
+     "p": 60,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 11.5385,
+     "d": 0.5769,
+     "p": 67,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 12.1154,
+     "d": 1.1538,
+     "p": 65,
+     "syl": "you,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 13.2692,
+   "end": 16.7307,
+   "text": "Happy birthday dear superstar,",
+   "notes": [
+    {
+     "t": 13.2692,
+     "d": 0.4327,
+     "p": 60,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 13.7019,
+     "d": 0.1442,
+     "p": 60,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 13.8462,
+     "d": 0.5769,
+     "p": 72,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 14.4231,
+     "d": 0.5769,
+     "p": 69,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 15.0,
+     "d": 0.5769,
+     "p": 65,
+     "syl": "dear",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 15.5769,
+     "d": 0.2885,
+     "p": 64,
+     "syl": "su",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 15.8654,
+     "d": 0.2885,
+     "p": 64,
+     "syl": "per",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 16.1538,
+     "d": 0.5769,
+     "p": 62,
+     "syl": "star,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 16.7308,
+   "end": 20.7693,
+   "text": "Happy birthday to you!",
+   "notes": [
+    {
+     "t": 16.7308,
+     "d": 0.4327,
+     "p": 70,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 17.1635,
+     "d": 0.1442,
+     "p": 70,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 17.3077,
+     "d": 0.5769,
+     "p": 69,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 17.8846,
+     "d": 0.5769,
+     "p": 65,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 18.4615,
+     "d": 0.5769,
+     "p": 67,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 19.0385,
+     "d": 1.7308,
+     "p": 65,
+     "syl": "you!",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 21.9231,
+   "end": 25.3846,
+   "text": "Happy birthday to you,",
+   "notes": [
+    {
+     "t": 21.9231,
+     "d": 0.4327,
+     "p": 62,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 22.3558,
+     "d": 0.1442,
+     "p": 62,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 22.5,
+     "d": 0.5769,
+     "p": 64,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 23.0769,
+     "d": 0.5769,
+     "p": 62,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 23.6538,
+     "d": 0.5769,
+     "p": 67,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 24.2308,
+     "d": 1.1538,
+     "p": 66,
+     "syl": "you,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 25.3846,
+   "end": 28.8461,
+   "text": "Happy birthday to you,",
+   "notes": [
+    {
+     "t": 25.3846,
+     "d": 0.4327,
+     "p": 62,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 25.8173,
+     "d": 0.1442,
+     "p": 62,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 25.9615,
+     "d": 0.5769,
+     "p": 64,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 26.5385,
+     "d": 0.5769,
+     "p": 62,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 27.1154,
+     "d": 0.5769,
+     "p": 69,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 27.6923,
+     "d": 1.1538,
+     "p": 67,
+     "syl": "you,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 28.8462,
+   "end": 32.3077,
+   "text": "Happy birthday dear superstar,",
+   "notes": [
+    {
+     "t": 28.8462,
+     "d": 0.4327,
+     "p": 62,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 29.2788,
+     "d": 0.1442,
+     "p": 62,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 29.4231,
+     "d": 0.5769,
+     "p": 74,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 30.0,
+     "d": 0.5769,
+     "p": 71,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 30.5769,
+     "d": 0.5769,
+     "p": 67,
+     "syl": "dear",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 31.1538,
+     "d": 0.2885,
+     "p": 66,
+     "syl": "su",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 31.4423,
+     "d": 0.2885,
+     "p": 66,
+     "syl": "per",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 31.7308,
+     "d": 0.5769,
+     "p": 64,
+     "syl": "star,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 32.3077,
+   "end": 36.3462,
+   "text": "Happy birthday to you!",
+   "notes": [
+    {
+     "t": 32.3077,
+     "d": 0.4327,
+     "p": 72,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 32.7404,
+     "d": 0.1442,
+     "p": 72,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 32.8846,
+     "d": 0.5769,
+     "p": 71,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 33.4615,
+     "d": 0.5769,
+     "p": 67,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 34.0385,
+     "d": 0.5769,
+     "p": 69,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 34.6154,
+     "d": 1.7308,
+     "p": 67,
+     "syl": "you!",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  },
+  {
+   "start": 37.5,
+   "end": 40.9615,
+   "text": "Happy birthday to you,",
+   "notes": [
+    {
+     "t": 37.5,
+     "d": 0.4327,
+     "p": 63,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 37.9327,
+     "d": 0.1442,
+     "p": 63,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 38.0769,
+     "d": 0.5769,
+     "p": 65,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 38.6538,
+     "d": 0.5769,
+     "p": 63,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 39.2308,
+     "d": 0.5769,
+     "p": 68,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 39.8077,
+     "d": 1.1538,
+     "p": 67,
+     "syl": "you,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 40.9615,
+   "end": 44.423,
+   "text": "Happy birthday to you,",
+   "notes": [
+    {
+     "t": 40.9615,
+     "d": 0.4327,
+     "p": 63,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 41.3942,
+     "d": 0.1442,
+     "p": 63,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 41.5385,
+     "d": 0.5769,
+     "p": 65,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 42.1154,
+     "d": 0.5769,
+     "p": 63,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 42.6923,
+     "d": 0.5769,
+     "p": 70,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 43.2692,
+     "d": 1.1538,
+     "p": 68,
+     "syl": "you,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 44.4231,
+   "end": 47.8846,
+   "text": "Happy birthday dear superstar,",
+   "notes": [
+    {
+     "t": 44.4231,
+     "d": 0.4327,
+     "p": 63,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 44.8558,
+     "d": 0.1442,
+     "p": 63,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 45.0,
+     "d": 0.5769,
+     "p": 75,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 45.5769,
+     "d": 0.5769,
+     "p": 72,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 46.1538,
+     "d": 0.5769,
+     "p": 68,
+     "syl": "dear",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 46.7308,
+     "d": 0.2885,
+     "p": 67,
+     "syl": "su",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 47.0192,
+     "d": 0.2885,
+     "p": 67,
+     "syl": "per",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 47.3077,
+     "d": 0.5769,
+     "p": 65,
+     "syl": "star,",
+     "wordEnd": true,
+     "golden": false
+    }
+   ]
+  },
+  {
+   "start": 47.8846,
+   "end": 51.9231,
+   "text": "Happy birthday to you!",
+   "notes": [
+    {
+     "t": 47.8846,
+     "d": 0.4327,
+     "p": 73,
+     "syl": "Hap",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 48.3173,
+     "d": 0.1442,
+     "p": 73,
+     "syl": "py",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 48.4615,
+     "d": 0.5769,
+     "p": 72,
+     "syl": "birth",
+     "wordEnd": false,
+     "golden": false
+    },
+    {
+     "t": 49.0385,
+     "d": 0.5769,
+     "p": 68,
+     "syl": "day",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 49.6154,
+     "d": 0.5769,
+     "p": 70,
+     "syl": "to",
+     "wordEnd": true,
+     "golden": false
+    },
+    {
+     "t": 50.1923,
+     "d": 1.7308,
+     "p": 68,
+     "syl": "you!",
+     "wordEnd": true,
+     "golden": true
+    }
+   ]
+  }
+ ]
+}

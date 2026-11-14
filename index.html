@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gabrielvision Song Contest</title>
+  <meta name="description" content="A karaoke singing game in your browser. Sing into your mic, hit the notes, beat your friends.">
+  <meta name="theme-color" content="#06070D">
+  <meta property="og:title" content="Gabrielvision Song Contest">
+  <meta property="og:description" content="Sing into your mic. Hit every note. Beat your friends.">
+  <meta property="og:image" content="img/stage-title.jpg">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%2306070D'/%3E%3Cpath d='M32 12a10 10 0 0 1 10 10v10a10 10 0 0 1-20 0V22a10 10 0 0 1 10-10z' fill='%23FFD66B'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0M32 46v8' stroke='%23FFD66B' stroke-width='4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@600;800;900&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="preload" as="image" href="img/stage-title.jpg">
+</head>
+<body>
+  <div id="bg" aria-hidden="true">
+    <div class="bg-img" id="bgA"></div>
+    <div class="bg-img" id="bgB"></div>
+    <div class="beams"><i></i><i></i><i></i><i></i></div>
+    <div class="shade"></div>
+  </div>
+  <canvas id="stage" aria-hidden="true"></canvas>
+  <canvas id="fx" aria-hidden="true"></canvas>
+
+  <!-- Title -->
+  <section class="screen" id="title-screen">
+    <div class="title-wrap">
+      <p class="kicker">Live from your living room</p>
+      <h1 class="logo"><span class="logo-word">Gabrielvision</span><span class="logo-sub">Song Contest</span></h1>
+      <p class="tagline">Sing into your mic. Hit every note. Beat your friends.</p>
+      <button class="btn-play" id="btn-start" type="button"><span>Press play</span></button>
+      <p class="hint">or press Enter · best with headphones</p>
+    </div>
+    <footer class="title-foot">
+      <span>Songs everyone knows</span><span>Pitch scoring</span><span>Lyric check</span><span>Up to 2 singers</span>
+    </footer>
+  </section>
+
+  <!-- Song select + setup -->
+  <section class="screen" id="select-screen" hidden>
+    <header class="topbar">
+      <button class="icon-btn" id="btn-home" type="button" aria-label="Back to title">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+      </button>
+      <div class="mini-logo">Gabrielvision <b>Song Contest</b></div>
+    </header>
+    <div class="select-grid">
+      <div class="picker">
+        <div class="carousel" id="carousel" role="listbox" aria-label="Songs"></div>
+        <div class="song-info">
+          <h2 id="song-title">Jingle Bells</h2>
+          <p class="credit" id="song-credit"></p>
+          <div class="chips" id="song-chips"></div>
+          <p class="best" id="song-best"></p>
+        </div>
+      </div>
+      <aside class="setup glass">
+        <h3>Who's singing</h3>
+        <div id="player-rows"></div>
+        <button class="btn-ghost" id="btn-add-player" type="button">+ Add a second singer</button>
+        <div class="field">
+          <span class="field-label">Difficulty</span>
+          <div class="seg" id="seg-difficulty" role="radiogroup" aria-label="Difficulty">
+            <button type="button" data-v="easy">Easy</button><button type="button" data-v="normal">Normal</button><button type="button" data-v="hard">Hard</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="field-label">Original vocal</span>
+          <div class="seg" id="seg-guide" role="radiogroup" aria-label="Original vocal volume">
+            <button type="button" data-v="off">Off</button><button type="button" data-v="soft">Soft</button><button type="button" data-v="full">Full</button>
+          </div>
+        </div>
+        <div class="field field-row">
+          <label class="switch"><input type="checkbox" id="opt-lyrics"><span class="knob"></span></label>
+          <div>
+            <span class="field-label">Lyric check</span>
+            <p class="field-note" id="lyrics-status">A speech model checks that you sing the words, not just hum.</p>
+          </div>
+        </div>
+        <button class="btn-primary" id="btn-sing" type="button">Sing</button>
+        <button class="btn-ghost" id="btn-demo" type="button">Watch the demo singer</button>
+      </aside>
+    </div>
+  </section>
+
+  <!-- Gameplay -->
+  <section class="screen" id="game-screen" hidden>
+    <div class="progress"><i id="progress-fill"></i></div>
+    <div class="hud" id="hud"></div>
+    <div class="game-meta">
+      <span id="game-title"></span>
+      <span id="game-time"></span>
+      <button class="icon-btn" id="btn-pause" type="button" aria-label="Pause">
+        <svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" /></svg>
+      </button>
+    </div>
+    <div id="popups" aria-live="polite"></div>
+    <div class="countdown" id="countdown" hidden></div>
+    <div class="lyrics" id="lyrics">
+      <p class="line-now" id="line-now"></p>
+      <p class="line-next" id="line-next"></p>
+    </div>
+    <div class="loading" id="loading" hidden><div class="spinner"></div><p id="loading-text">Loading the stage…</p></div>
+  </section>
+
+  <!-- Pause -->
+  <div class="overlay" id="pause" hidden>
+    <div class="pause-card glass">
+      <h3>Paused</h3>
+      <button class="btn-primary" id="btn-resume" type="button">Resume</button>
+      <button class="btn-ghost" id="btn-restart" type="button">Restart song</button>
+      <button class="btn-ghost" id="btn-quit" type="button">Quit to songs</button>
+      <div class="field">
+        <span class="field-label">Mic delay</span>
+        <div class="range-row"><input type="range" id="opt-latency" min="0" max="300" step="10"><output id="latency-out">0 ms</output></div>
+        <p class="field-note">Raise it if your singing scores late even when you're on time.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <section class="screen" id="results-screen" hidden>
+    <div class="results-grid">
+      <div class="board">
+        <p class="kicker" id="res-kicker">Results</p>
+        <h2 id="res-title"></h2>
+        <ol class="ranking" id="ranking"></ol>
+        <div class="res-actions">
+          <button class="btn-primary" id="btn-again" type="button">Sing again</button>
+          <button class="btn-ghost" id="btn-songs" type="button">Pick another song</button>
+        </div>
+        <div class="leaderboard glass" id="leaderboard"></div>
+      </div>
+      <div class="coach glass" id="coach"></div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" role="alert" hidden></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
