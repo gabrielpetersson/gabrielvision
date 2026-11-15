@@ -9,6 +9,7 @@ import { listUserSongs, getUserSong, saveUserSong, deleteUserSong } from './impo
 import { packSong, unpackSong } from './share.js';
 import { SERVER } from './import/server.js';
 import { Room, inviteLink, roomInLink } from './room.js';
+import { startVinyl } from './vinyl.js';
 
 const $ = (id) => document.getElementById(id);
 const PLAYER_COLORS = ['#6EF3FF', '#FF77B7', '#B8FF6B', '#FFB547', '#A98BFF', '#FF8A5B'];
@@ -73,7 +74,7 @@ function show(name) {
   for (const s of ['title', 'select', 'room', 'game', 'results']) $(`${s}-screen`).hidden = s !== name;
   document.body.dataset.screen = name;
   $('stage').hidden = name !== 'game';
-  fx.active = name === 'title' || name === 'results';
+  fx.active = name === 'results';
 }
 
 let bgFlip = false;
@@ -1341,11 +1342,13 @@ document.addEventListener('keydown', (e) => {
 show('title');
 setStage('img/stage-title.jpg');
 setTheme(SONGS[selIndex]);
+startVinyl($('platter'), $('rec'), () => document.body.dataset.screen === 'title');
 // Test hook: ?singer=<audio url> makes room games sing that recording instead of the mic.
 const roomSinger = params.get('singer') || undefined;
 if (roomInLink()) {
   $('btn-start').hidden = true;
   $('btn-friends').querySelector('span').textContent = 'Join the room';
+  $('friends-note').textContent = 'your friends are waiting';
 }
 window.__gv.songs = () => loadUserSongs().then(() => SONGS.map((s) => ({ id: s.id, title: s.title, user: !!s.user })));
 

@@ -1,4 +1,4 @@
-# Gabrielvision Song Contest
+# Gabriel Singing Contest
 
 A karaoke singing game in the browser: sing into your mic, a comet traces your pitch over scrolling
 note bars, and you score more the closer you stay to each note. A speech model running in your

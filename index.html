@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Gabrielvision Song Contest</title>
+  <title>Gabriel Singing Contest</title>
   <meta name="description" content="A karaoke singing game in your browser. Sing into your mic, hit the notes, beat your friends.">
   <meta name="theme-color" content="#06070D">
-  <meta property="og:title" content="Gabrielvision Song Contest">
+  <meta property="og:title" content="Gabriel Singing Contest">
   <meta property="og:description" content="Sing into your mic. Hit every note. Beat your friends.">
   <meta property="og:image" content="img/stage-title.jpg">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%2306070D'/%3E%3Cpath d='M32 12a10 10 0 0 1 10 10v10a10 10 0 0 1-20 0V22a10 10 0 0 1 10-10z' fill='%23FFD66B'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0M32 46v8' stroke='%23FFD66B' stroke-width='4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@600;800;900&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@600;800;900&family=Archivo+Black&family=Archivo:wght@600;800&display=swap">
   <link rel="stylesheet" href="css/app.css">
   <link rel="preload" as="image" href="img/stage-title.jpg">
 </head>
@@ -26,21 +26,21 @@
   <canvas id="stage" aria-hidden="true"></canvas>
   <canvas id="fx" aria-hidden="true"></canvas>
 
-  <!-- Title -->
+  <!-- Title: a turntable seen from above; grab the record and scratch it -->
   <section class="screen" id="title-screen">
-    <div class="title-wrap">
-      <p class="kicker">Live from your living room</p>
-      <h1 class="logo"><span class="logo-word">Gabrielvision</span><span class="logo-sub">Song Contest</span></h1>
-      <p class="tagline">Sing into your mic. Hit every note. Beat your friends.</p>
-      <div class="start-choice">
-        <button class="btn-play" id="btn-start" type="button"><span>Sing alone</span></button>
-        <button class="btn-play friends" id="btn-friends" type="button"><span>Sing with friends</span></button>
+    <div class="deck">
+      <div class="deck-left">
+        <h1 class="vlogo">Gabriel<br>Singing<br>Contest</h1>
+        <p class="vtag">The singing game. Drop in any song. Grab the record.</p>
+        <button class="sticker" id="btn-start" type="button" style="--r: -3deg"><span>Sing alone</span><small>just you and the mic</small></button>
+        <button class="sticker sun" id="btn-friends" type="button" style="--r: 2deg"><span>Sing with friends</span><small id="friends-note">send a link, everyone joins</small></button>
+        <p class="vhint">Best with headphones</p>
       </div>
-      <p class="hint">Best with headphones</p>
+      <div class="platter" id="platter">
+        <canvas id="rec"></canvas>
+        <svg class="arm" viewBox="0 0 200 300" aria-hidden="true"><circle cx="165" cy="36" r="26" fill="#141414" /><path d="M165 36 L120 240 L92 268" stroke="#141414" stroke-width="12" fill="none" stroke-linecap="round" /><rect x="70" y="256" width="40" height="22" rx="4" fill="#141414" transform="rotate(35 90 267)" /></svg>
+      </div>
     </div>
-    <footer class="title-foot">
-      <span>Any song you upload</span><span>Pitch scoring</span><span>Lyric check</span><span>Take turns with friends</span>
-    </footer>
   </section>
 
   <!-- Song select + setup -->
@@ -49,7 +49,7 @@
       <button class="icon-btn" id="btn-home" type="button" aria-label="Back to title">
         <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
       </button>
-      <div class="mini-logo">Gabrielvision <b>Song Contest</b></div>
+      <div class="mini-logo">Gabriel <b>Singing Contest</b></div>
     </header>
     <div class="select-grid">
       <div class="picker">
@@ -106,7 +106,7 @@
       <button class="icon-btn" id="btn-room-home" type="button" aria-label="Leave the room">
         <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
       </button>
-      <div class="mini-logo">Gabrielvision <b>Song Contest</b></div>
+      <div class="mini-logo">Gabriel <b>Singing Contest</b></div>
     </header>
     <div class="room-grid">
       <div class="room-main">
