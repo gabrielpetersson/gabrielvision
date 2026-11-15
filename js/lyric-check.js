@@ -8,8 +8,9 @@ const HOMOPHONES = [
   ['was', 'is'], ['the', 'a', 'da'], ['twas', 'it', 'was'], ['oer', 'over', 'or'],
 ];
 
+// Lower-case words without accents or punctuation, in any script.
 export const words = (s) =>
-  s.toLowerCase().replace(/[’']/g, '').replace(/[^a-z\s-]/g, ' ').replace(/-/g, ' ').split(/\s+/).filter(Boolean);
+  s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[’']/g, '').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/-/g, ' ').split(/\s+/).filter(Boolean);
 
 function lev(a, b) {
   const m = a.length, n = b.length;
@@ -21,7 +22,7 @@ function lev(a, b) {
   return d[m][n];
 }
 
-const same = (a, b) =>
+export const sameWord = (a, b) =>
   a === b ||
   HOMOPHONES.some((g) => g.includes(a) && g.includes(b)) ||
   (Math.max(a.length, b.length) >= 5 ? lev(a, b) <= 2 : Math.max(a.length, b.length) >= 3 && lev(a, b) <= 1);
@@ -33,12 +34,13 @@ export function lyricMatch(expected, heard) {
   const dp = Array.from({ length: e.length + 1 }, () => new Array(h.length + 1).fill(0));
   for (let i = 1; i <= e.length; i++)
     for (let j = 1; j <= h.length; j++)
-      dp[i][j] = same(e[i - 1], h[j - 1]) ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      dp[i][j] = sameWord(e[i - 1], h[j - 1]) ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
   return dp[e.length][h.length] / e.length;
 }
 
 export class LyricChecker {
-  constructor(onStatus) {
+  constructor(language, onStatus) {
+    this.language = language;
     this.onStatus = onStatus;
     this.status = 'off';
     this.pending = new Map();
@@ -81,7 +83,7 @@ export class LyricChecker {
       this.status = 'error';
       this.onStatus?.({ status: 'error', message: err.message });
     });
-    this.worker.postMessage({ type: 'load' });
+    this.worker.postMessage({ type: 'load', language: this.language });
     return this.ready;
   }
 
@@ -99,5 +101,11 @@ export class LyricChecker {
     const p = this.queue.then(run, run);
     this.queue = p.catch(() => {});
     return p;
+  }
+
+  dispose() {
+    this.worker?.terminate();
+    for (const p of this.pending.values()) p.reject(new Error('Lyric check stopped'));
+    this.pending.clear();
   }
 }

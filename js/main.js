@@ -3,11 +3,16 @@ import { VoiceInput, listMics, openMic } from './voice-input.js';
 import { Performance, DIFFICULTY, foldDiff } from './scoring.js';
 import { StageRenderer } from './renderer.js';
 import { LyricChecker, lyricMatch } from './lyric-check.js';
-import { SONGS, loadChart } from './songs.js';
+import { SONGS, loadChart, userSong, releaseSong } from './songs.js';
 import { midiName } from './pitch.js';
+import { listUserSongs, saveUserSong, deleteUserSong } from './import/song-store.js';
+import { SERVER } from './import/server.js';
 
 const $ = (id) => document.getElementById(id);
-const PLAYER_COLORS = ['#6EF3FF', '#FF77B7'];
+const PLAYER_COLORS = ['#6EF3FF', '#FF77B7', '#B8FF6B', '#FFB547', '#A98BFF', '#FF8A5B'];
+// Singing together: one mic each, up to two. Taking turns: one mic passed around, two lines each.
+const MAX_PLAYERS = { together: 2, turns: 6 };
+const LINES_PER_TURN = 2;
 const GUIDE_LEVEL = { off: 0, soft: 0.28, full: 0.9 };
 const params = new URLSearchParams(location.search);
 
@@ -21,7 +26,7 @@ const store = {
   },
 };
 const settings = Object.assign(
-  { players: [{ name: 'Player 1', deviceId: '' }], difficulty: 'normal', guide: 'soft', lyrics: true, latency: 0, song: 0 },
+  { players: [{ name: 'Player 1', deviceId: '' }], mode: 'together', difficulty: 'normal', guide: 'soft', lyrics: true, latency: 0, song: 0 },
   store.get('settings', {}),
 );
 const saveSettings = () => store.set('settings', settings);
@@ -42,9 +47,15 @@ function ensureEngine() {
   return engine.resume().then(() => engine);
 }
 
-function ensureChecker() {
+// One speech model at a time: English-only for built-in songs (language null), the multilingual one
+// (already downloaded by the importer) for uploads.
+function ensureChecker(language = SONGS[selIndex]?.chartData?.language ?? null) {
+  if (checker && checker.language !== language) {
+    checker.dispose();
+    checker = null;
+  }
   if (!checker) {
-    checker = new LyricChecker((s) => {
+    checker = new LyricChecker(language, (s) => {
       const el = $('lyrics-status');
       if (s.status === 'loading') el.textContent = `Loading the speech model… ${Math.round((s.progress || 0) * 100)}%`;
       else if (s.status === 'ready') el.textContent = 'Speech model ready. It checks that you sing the words, not just hum.';
@@ -83,9 +94,10 @@ function setTheme(song) {
   document.documentElement.style.setProperty('--accent-2', song.accent2);
 }
 
-function toast(msg) {
+function toast(msg, kind = 'error') {
   const t = $('toast');
   t.textContent = msg;
+  t.classList.toggle('ok', kind === 'ok');
   t.hidden = false;
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => (t.hidden = true), 6000);
@@ -141,6 +153,7 @@ let lastFx = performance.now();
 // ---------- Title ----------
 async function enterSelect() {
   await ensureEngine();
+  await loadUserSongs();
   show('select');
   renderSelect();
   if (settings.lyrics) ensureChecker();
@@ -151,9 +164,18 @@ $('btn-start').addEventListener('click', () => enterSelect());
 $('btn-home').addEventListener('click', () => { stopMonitors(); show('title'); setStage('img/stage-title.jpg'); });
 
 // ---------- Song select ----------
+let userSongsLoaded = null;
+function loadUserSongs() {
+  userSongsLoaded ||= listUserSongs()
+    .then((recs) => recs.forEach((r) => SONGS.push(userSong(r))))
+    .catch((err) => console.warn('Could not read your saved songs', err));
+  return userSongsLoaded;
+}
+
 function renderSelect() {
   const car = $('carousel');
-  if (!car.children.length) {
+  if (car.children.length !== SONGS.length) {
+    car.innerHTML = '';
     SONGS.forEach((s, i) => {
       const b = document.createElement('button');
       b.className = 'cover';
@@ -198,7 +220,7 @@ function renderSongInfo() {
     .then((chart) => {
       if (song !== SONGS[selIndex]) return;
       $('song-credit').textContent = chart.credit;
-      chips.push(`<span class="chip">${chart.bpm} BPM</span>`, `<span class="chip">${fmtTime(chart.duration)}</span>`);
+      chips.push(`<span class="chip">${Math.round(chart.bpm)} BPM</span>`, `<span class="chip">${fmtTime(chart.duration)}</span>`);
       $('song-chips').innerHTML = chips.join('');
     })
     .catch(() => {
@@ -208,12 +230,19 @@ function renderSongInfo() {
   $('song-chips').innerHTML = chips.join('');
   const top = leaderboard(song.id)[0];
   $('song-best').textContent = top ? `Best: ${fmtNum(top.score)} by ${top.name}` : '';
+  const remove = $('btn-remove-song');
+  remove.hidden = !song.user;
+  remove.textContent = 'Remove';
+  delete remove.dataset.armed;
 }
 
 function renderSetup() {
+  const turns = settings.mode === 'turns';
   const rows = $('player-rows');
   rows.innerHTML = '';
   settings.players.forEach((p, i) => {
+    // Taking turns shares the first singer's microphone, so only that row picks one.
+    const mic = !turns || i === 0;
     const row = document.createElement('div');
     row.className = 'player-row';
     row.style.setProperty('--c', PLAYER_COLORS[i]);
@@ -223,13 +252,13 @@ function renderSetup() {
         <input type="text" id="p${i}-name" maxlength="18" aria-label="Singer ${i + 1} name" value="">
         ${i > 0 ? `<button class="icon-btn" type="button" id="p${i}-remove" aria-label="Remove singer ${i + 1}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
       </div>
-      <select id="p${i}-mic" aria-label="Microphone for singer ${i + 1}"><option value="">Default microphone</option></select>
-      <div class="meter"><span class="bar"><i id="p${i}-level"></i></span><span class="note" id="p${i}-note">–</span></div>`;
+      ${mic ? `<select id="p${i}-mic" aria-label="${turns ? 'Microphone everyone shares' : `Microphone for singer ${i + 1}`}"><option value="">Default microphone</option></select>
+      <div class="meter"><span class="bar"><i id="p${i}-level"></i></span><span class="note" id="p${i}-note">–</span></div>` : ''}`;
     rows.appendChild(row);
     const name = row.querySelector(`#p${i}-name`);
     name.value = p.name;
     name.addEventListener('input', () => { p.name = name.value.trim() || `Player ${i + 1}`; saveSettings(); });
-    row.querySelector(`#p${i}-mic`).addEventListener('change', (e) => {
+    row.querySelector(`#p${i}-mic`)?.addEventListener('change', (e) => {
       p.deviceId = e.target.value;
       saveSettings();
       connectMonitors();
@@ -241,9 +270,13 @@ function renderSetup() {
       connectMonitors();
     });
   });
-  $('btn-add-player').hidden = settings.players.length >= 2;
+  const max = MAX_PLAYERS[settings.mode];
+  $('btn-add-player').hidden = settings.players.length >= max;
+  $('mode-note').textContent = turns
+    ? `Pass one mic around: each singer takes ${LINES_PER_TURN} lines, then the next one is up. Up to ${max} singers.`
+    : 'Everyone sings every line, each on their own mic. Up to two singers.';
   fillMicLists();
-  for (const [id, key] of [['seg-difficulty', 'difficulty'], ['seg-guide', 'guide']]) {
+  for (const [id, key] of [['seg-mode', 'mode'], ['seg-difficulty', 'difficulty'], ['seg-guide', 'guide']]) {
     for (const b of $(id).querySelectorAll('button')) b.setAttribute('aria-checked', b.dataset.v === settings[key]);
   }
   $('opt-lyrics').checked = settings.lyrics;
@@ -262,18 +295,20 @@ async function fillMicLists() {
 }
 
 $('btn-add-player').addEventListener('click', () => {
-  settings.players.push({ name: 'Player 2', deviceId: '' });
+  settings.players.push({ name: `Player ${settings.players.length + 1}`, deviceId: '' });
   saveSettings();
   renderSetup();
   connectMonitors();
 });
-for (const [id, key] of [['seg-difficulty', 'difficulty'], ['seg-guide', 'guide']]) {
+for (const [id, key] of [['seg-mode', 'mode'], ['seg-difficulty', 'difficulty'], ['seg-guide', 'guide']]) {
   $(id).addEventListener('click', (e) => {
     const v = e.target.closest('button')?.dataset.v;
     if (!v) return;
     settings[key] = v;
+    if (key === 'mode') settings.players.splice(MAX_PLAYERS[v]);
     saveSettings();
     renderSetup();
+    if (key === 'mode') connectMonitors();
   });
 }
 $('opt-lyrics').addEventListener('change', (e) => {
@@ -289,7 +324,8 @@ $('btn-demo').addEventListener('click', () => startGame({ mode: 'demo' }));
 async function connectMonitors() {
   stopMonitors();
   await ensureEngine();
-  for (let i = 0; i < settings.players.length; i++) {
+  const mics = settings.mode === 'turns' ? 1 : settings.players.length;
+  for (let i = 0; i < mics; i++) {
     try {
       const stream = await getStream(i);
       const m = new VoiceInput(engine, { stream });
@@ -359,40 +395,49 @@ async function startGame(opts) {
   $('popups').innerHTML = '';
   $('line-now').innerHTML = '';
   $('line-next').textContent = '';
+  $('turn-call').hidden = true;
   try {
     await ensureEngine();
     const [chart, inst, vocals] = await Promise.all([loadChart(song), engine.load(song.inst), engine.load(song.vocals)]);
-    const players = [];
-    if (opts.mode === 'demo') {
-      players.push({ name: 'Demo singer', source: { buffer: vocals, audible: true } });
-    } else if (opts.mode === 'file') {
-      const buffer = await engine.load(opts.url);
-      players.push({ name: opts.name || 'Test singer', source: { buffer, audible: opts.audible } });
-    } else {
-      for (let i = 0; i < settings.players.length; i++) players.push({ name: settings.players[i].name, source: { stream: await getStream(i) } });
-    }
+    const difficulty = opts.difficulty || settings.difficulty;
+    // Who sings: the setup panel's singers with mics, or one recorded singer for the demo and tests.
+    const turnsMode = opts.mode === 'mic' ? settings.mode === 'turns' : !!opts.players;
+    const names = opts.mode === 'mic'
+      ? settings.players.slice(0, MAX_PLAYERS[settings.mode]).map((p) => p.name)
+      : opts.players || [opts.mode === 'demo' ? 'Demo singer' : opts.name || 'Test singer'];
+    const turns = turnsMode && names.length > 1;
+    const sourceFor = async (i) => opts.mode === 'demo' ? { buffer: vocals, audible: true }
+      : opts.mode === 'file' ? { buffer: await engine.load(opts.url), audible: opts.audible }
+      : { stream: await getStream(i) };
     const lyricsOn = opts.lyrics ?? settings.lyrics;
-    if (lyricsOn) ensureChecker();
-    for (const [i, p] of players.entries()) {
-      p.id = `p${i}`;
-      p.color = PLAYER_COLORS[i];
-      p.input = new VoiceInput(engine, p.source, { latency: settings.latency / 1000 });
-      await p.input.connect();
-      p.input.enablePcm(lyricsOn);
-      p.perf = new Performance(chart, opts.difficulty || settings.difficulty);
-      p.frames = p.input.history;
-      p.shown = 0;
+    if (lyricsOn) ensureChecker(chart.language ?? null);
+    const inputs = [];
+    for (let i = 0; i < (turns ? 1 : names.length); i++) {
+      const input = new VoiceInput(engine, await sourceFor(i), { latency: settings.latency / 1000 });
+      await input.connect();
+      input.enablePcm(lyricsOn);
+      inputs.push({ input, players: [] });
     }
+    // Taking turns: lines go out in pairs, round-robin.
+    const owners = chart.lines.map((_, i) => (turns ? Math.floor(i / LINES_PER_TURN) % names.length : null));
+    const players = names.map((name, i) => {
+      const group = inputs[turns ? 0 : i];
+      const owned = turns ? new Set(owners.flatMap((o, li) => (o === i ? [li] : []))) : null;
+      const p = { id: `p${i}`, name, color: PLAYER_COLORS[i], input: group.input, frames: group.input.history, perf: new Performance(chart, difficulty, owned), shown: 0 };
+      group.players.push(p);
+      return p;
+    });
+    const voices = turns ? [{ id: 'mic', color: players[0].color, frames: inputs[0].input.history, live: null }] : players;
     if (!renderer) renderer = new StageRenderer($('stage'));
-    renderer.setSong(chart, { accent: song.accent });
+    renderer.setSong(chart, { accent: song.accent, lineColors: turns ? owners.map((o) => players[o].color) : null });
     renderer.resize();
-    buildHud(players);
+    buildHud(players, turns);
     $('game-title').textContent = song.title;
     $('loading').hidden = true;
     const guide = opts.mode === 'demo' || opts.mode === 'file' ? 0 : GUIDE_LEVEL[opts.guide || settings.guide];
-    game = { song, chart, players, opts, lyricsOn, pendingChecks: 0, lineShown: -1, ended: false, beatsShown: new Set() };
+    game = { song, chart, players, inputs, voices, turns, owners, opts, difficulty, lyricsOn, pendingChecks: 0, lineShown: -1, ended: false, beatsShown: new Set(), active: -1 };
     const at = engine.play({ inst, vocals, guide });
-    players.forEach((p) => p.input.startWithSong(at));
+    inputs.forEach((g) => g.input.startWithSong(at));
     window.__gv.status = 'playing';
     requestAnimationFrame(tick);
   } catch (err) {
@@ -407,10 +452,11 @@ async function startGame(opts) {
   }
 }
 
-function buildHud(players) {
+function buildHud(players, turns) {
+  $('hud').classList.toggle('turns', turns);
   $('hud').innerHTML = players
     .map((p, i) => `
-      <div class="pcard ${i ? 'p2' : ''}" style="--c:${p.color}">
+      <div class="pcard ${i % 2 ? 'p2' : ''}" id="${p.id}-card" style="--c:${p.color}">
         <span class="name">${escapeHtml(p.name)}</span>
         <span class="score" id="${p.id}-score">0</span>
         <span class="mult" id="${p.id}-mult" data-m="1">×1</span>
@@ -431,41 +477,62 @@ function nearestNote(perf, t) {
   return best;
 }
 
+// The line being sung at t, or the next one coming up.
+function lineAt(t) {
+  const lines = game.chart.lines;
+  const i = lines.findIndex((l) => t < l.end + 0.3);
+  return i < 0 ? lines.length - 1 : i;
+}
+
 function tick() {
   if (!game || game.ended) return;
   if (engine.playing?.pausedAt != null) { requestAnimationFrame(tick); return; }
   const { chart, players } = game;
   const now = engine.heardTime();
   const center = (renderer.lo + renderer.hi) / 2;
+  const tuning = chart.tuning ?? 0;
 
-  for (const p of players) {
-    for (const f of p.input.drain()) {
-      p.perf.feed(f.t, f.midi);
-      f.credit = p.perf.live.credit;
+  for (const g of game.inputs) {
+    for (const f of g.input.drain()) {
+      for (const p of g.players) p.perf.feed(f.t, f.midi);
+      // With one shared mic, the comet follows whoever owns the line at that moment.
+      const shown = g.players.length > 1 ? players[game.owners[lineAt(f.t)]] : g.players[0];
+      f.credit = shown.perf.live.credit;
       if (f.midi == null) f.disp = null;
       else {
-        const n = p.perf.live.note || nearestNote(p.perf, f.t);
-        f.disp = n ? n.p + foldDiff(f.midi, n.p) : center + foldDiff(f.midi, center);
+        const m = f.midi - tuning;
+        const n = shown.perf.live.note || nearestNote(shown.perf, f.t);
+        f.disp = n ? n.p + foldDiff(m, n.p) : center + foldDiff(m, center);
       }
     }
+  }
+  for (const p of players) {
+    p.frames = p.input.history;
     p.live = p.perf.live;
     for (const ev of p.perf.events.splice(0)) handleEvent(p, ev);
   }
+  if (game.turns) {
+    const a = players[game.owners[lineAt(now)]];
+    Object.assign(game.voices[0], { color: a.color, live: a.perf.live, frames: game.inputs[0].input.history });
+  }
 
-  const spb = 60 / chart.bpm;
-  const phase = (((now / spb) % 1) + 1) % 1;
-  const downbeat = Math.round(now / spb) % chart.beatsPerBar === 0;
+  const spb = 60 / chart.bpm, beat = (now - (chart.beatOffset || 0)) / spb;
+  const phase = ((beat % 1) + 1) % 1;
+  const downbeat = Math.round(beat) % chart.beatsPerBar === 0;
   const pulse = Math.exp(-phase * 5) * (downbeat ? 1 : 0.6);
   document.getElementById('bg').style.setProperty('--pulse', pulse.toFixed(3));
-  renderer.draw(now, players, { pulse });
+  renderer.draw(now, players, { pulse }, game.voices);
   updateLyrics(now);
   updateHud(now);
   countdown(now, spb);
+  if (game.turns) turnCall(now);
   if (now >= chart.duration + 0.3) endGame();
   else requestAnimationFrame(tick);
 }
 
 function handleEvent(p, ev) {
+  // One singer at a time when taking turns, so their popups use the first slot.
+  const slot = game.turns ? 0 : game.players.indexOf(p);
   if (ev.type === 'note') {
     if (!ev.hit) return;
     const x = renderer.x(ev.note.t + ev.note.d, engine.heardTime());
@@ -478,12 +545,10 @@ function handleEvent(p, ev) {
       setTimeout(() => m.classList.remove('bump'), 180);
     }
   } else if (ev.type === 'line') {
-    const idx = game.players.indexOf(p);
-    popup(ev.rating.key, ev.rating.label, ev.bonus ? `+${fmtNum(ev.bonus)}` : '', idx);
+    popup(ev.rating.key, ev.rating.label, ev.bonus ? `+${fmtNum(ev.bonus)}` : '', slot);
     if (game.lyricsOn) scheduleLyricCheck(p, ev.line);
   } else if (ev.type === 'lyric' && ev.penalty > 0) {
-    const idx = game.players.indexOf(p);
-    popup('lyric', 'Sing the words!', `${ev.heard ? `heard “${ev.heard.trim().slice(0, 40)}” · ` : ''}−${fmtNum(ev.penalty)}`, idx, true);
+    popup('lyric', 'Sing the words!', `${ev.heard ? `heard “${ev.heard.trim().slice(0, 40)}” · ` : ''}−${fmtNum(ev.penalty)}`, slot, true);
   }
 }
 
@@ -519,30 +584,34 @@ function scheduleLyricCheck(p, line) {
   }, 500);
 }
 
+// "Name" chip in the singer's colour, shown before a line when friends take turns.
+const whoChip = (i) => (game.turns ? `<span class="who" style="--c:${game.players[game.owners[i]].color}">${escapeHtml(game.players[game.owners[i]].name)}</span>` : '');
+
 function updateLyrics(now) {
   const lines = game.chart.lines;
   let i = lines.findIndex((l) => now < l.end + 0.3);
   if (i >= 0 && lines[i].start - now > 5) i = -2;
   if (i !== game.lineShown) {
     game.lineShown = i;
-    const cur = $('line-now');
+    const cur = $('line-now'), next = $('line-next');
     if (i === -1) {
       cur.innerHTML = '';
-      $('line-next').textContent = '';
+      next.textContent = '';
     } else if (i === -2) {
       cur.innerHTML = '<span class="instrumental">♪ Instrumental ♪</span>';
-      const nxt = lines.find((l) => l.start > now);
-      $('line-next').textContent = nxt ? nxt.text : '';
+      const k = lines.findIndex((l) => l.start > now);
+      next.innerHTML = k >= 0 ? whoChip(k) + escapeHtml(lines[k].text) : '';
     } else {
       const line = lines[i];
-      cur.innerHTML = line.notes
+      cur.innerHTML = whoChip(i) + line.notes
         .map((n, k) => (n.syl === '~' ? '' : `<span class="syl${n.golden ? ' gold' : ''}" data-k="${k}">${escapeHtml(n.syl)}</span>`) + (n.wordEnd ? ' ' : ''))
         .join('');
       game.sylEls = [...cur.querySelectorAll('.syl')].map((el) => ({ el, k: +el.dataset.k, p: -1 }));
       cur.classList.remove('enter');
       void cur.offsetWidth;
       cur.classList.add('enter');
-      $('line-next').textContent = lines[i + 1]?.text || '';
+      const nxt = lines[i + 1];
+      next.innerHTML = nxt ? (game.turns && game.owners[i + 1] !== game.owners[i] ? whoChip(i + 1) : '') + escapeHtml(nxt.text) : '';
     }
   }
   if (i >= 0 && game.sylEls) {
@@ -559,8 +628,32 @@ function updateLyrics(now) {
   }
 }
 
+// "Ben — you're up": called out in the last seconds before a new singer's first line.
+function turnCall(now) {
+  const lines = game.chart.lines;
+  const k = lines.findIndex((l) => l.start > now);
+  const el = $('turn-call');
+  const owner = k >= 0 ? game.owners[k] : null;
+  const due = k >= 0 && lines[k].start - now < 2.6 && (k === 0 || game.owners[k - 1] !== owner);
+  if (!due) {
+    if (!el.hidden) { el.hidden = true; delete el.dataset.k; }
+    return;
+  }
+  if (el.dataset.k === String(k)) return;
+  const p = game.players[owner];
+  el.dataset.k = k;
+  el.style.setProperty('--c', p.color);
+  el.innerHTML = `${escapeHtml(p.name)}<small>you're up</small>`;
+  el.hidden = false;
+}
+
 function updateHud(now) {
   const { chart, players } = game;
+  const active = game.turns ? game.owners[lineAt(now)] : -1;
+  if (active !== game.active) {
+    game.active = active;
+    players.forEach((p, i) => $(`${p.id}-card`).classList.toggle('active', i === active));
+  }
   for (const p of players) {
     p.shown += (p.perf.score - p.shown) * 0.18;
     if (Math.abs(p.perf.score - p.shown) < 1) p.shown = p.perf.score;
@@ -591,6 +684,7 @@ async function endGame() {
   if (!game || game.ended) return;
   game.ended = true;
   engine.stop();
+  $('turn-call').hidden = true;
   const g = game;
   if (g.pendingChecks > 0) {
     $('loading').hidden = false;
@@ -599,13 +693,13 @@ async function endGame() {
     while (g.pendingChecks > 0 && performance.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 150));
     $('loading').hidden = true;
   }
-  g.players.forEach((p) => p.input.disconnect());
+  g.inputs.forEach(({ input }) => input.disconnect());
   const results = g.players.map((p) => ({ name: p.name, color: p.color, ...p.perf.finish() }));
   window.__gv.results = results.map(({ bestLine, worstLine, ...r }) => ({ ...r, bestLine: bestLine?.text, worstLine: worstLine?.text }));
   window.__gv.status = 'done';
   let board = leaderboard(g.song.id);
   if (g.opts.mode === 'mic') {
-    for (const r of results) board = addToBoard(g.song.id, { name: r.name, score: r.score, acc: r.accuracy, difficulty: g.opts.difficulty || settings.difficulty, at: Date.now() });
+    for (const r of results) board = addToBoard(g.song.id, { name: r.name, score: r.score, acc: r.accuracy, difficulty: g.difficulty, at: Date.now() });
   }
   showResults(g, results, board);
 }
@@ -614,7 +708,8 @@ function stopGame() {
   if (!game) return;
   game.ended = true;
   engine.stop();
-  game.players.forEach((p) => p.input.disconnect());
+  $('turn-call').hidden = true;
+  game.inputs.forEach(({ input }) => input.disconnect());
   game = null;
 }
 
@@ -649,7 +744,7 @@ $('opt-latency').addEventListener('input', (e) => {
   settings.latency = +e.target.value;
   $('latency-out').textContent = `${settings.latency} ms`;
   saveSettings();
-  game?.players.forEach((p) => (p.input.latency = settings.latency / 1000));
+  game?.inputs.forEach(({ input }) => (input.latency = settings.latency / 1000));
 });
 
 // ---------- Results ----------
@@ -661,7 +756,7 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 function showResults(g, results, board) {
   show('results');
   const ranked = [...results].sort((a, b) => b.score - a.score);
-  $('res-kicker').textContent = `${DIFFICULTY[g.opts.difficulty || settings.difficulty].label} · Results`;
+  $('res-kicker').textContent = `${DIFFICULTY[g.difficulty].label}${g.turns ? ' · Taking turns' : ''} · Results`;
   $('res-title').textContent = g.song.title;
   $('ranking').innerHTML = ranked
     .map((r, i) => `
@@ -736,9 +831,157 @@ $('btn-again').addEventListener('click', () => startGame(lastOpts()));
 $('btn-songs').addEventListener('click', () => enterSelect());
 const lastOpts = () => lastGameOpts || { mode: 'mic' };
 
+// ---------- Add your own song ----------
+const STEPS = [
+  { key: 'read', label: 'Reading the file' },
+  { key: 'separate', label: 'Separating the voice from the music' },
+  { key: 'lyrics', label: 'Listening for the words' },
+  { key: 'notes', label: 'Finding the notes' },
+  { key: 'save', label: 'Saving it on this device' },
+];
+// Raw pipeline stages → the step they belong to, with a note while that part runs.
+const STAGE = {
+  read: ['read'], download: ['separate', 'Loading the voice model (a 67 MB download the first time)'], separate: ['separate'],
+  upload: ['separate', 'Uploading to our server'], server: ['separate', 'Our server is separating the voice and writing down the words'],
+  pitch: ['lyrics', 'Tracking the melody'], 'lyrics-model': ['lyrics', 'Loading the speech model (a 77 MB download the first time)'],
+  words: ['lyrics', 'Writing down the words'], lyrics: ['lyrics'], notes: ['notes'], save: ['save'],
+};
+let importFile = null;
+let importAbort = null;
+
+async function openImport(file) {
+  $('import').hidden = false;
+  $('import-pick').hidden = false;
+  $('import-run').hidden = true;
+  setImportFile(file || null);
+  const { gpuDevice } = await import('./import/importer.js');
+  const gpu = await gpuDevice();
+  $('import-where').textContent = gpu
+    ? 'Runs on this device, so your song never leaves it. The first time it downloads about 150 MB of models.'
+    : SERVER
+      ? "This browser can't use the graphics chip, so our server does the heavy part. Your file is deleted right after."
+      : "This browser can't use the graphics chip, so it runs slowly here: a few minutes per minute of song.";
+}
+
+function setImportFile(file) {
+  importFile = file;
+  $('drop').classList.toggle('has-file', !!file);
+  const touch = matchMedia('(pointer: coarse)').matches;
+  $('drop-title').textContent = file ? file.name : touch ? 'Tap to choose a song' : 'Drop a song here';
+  $('drop-note').textContent = file ? `${(file.size / 1e6).toFixed(1)} MB · ${touch ? 'tap' : 'click'} to pick another` : `${touch ? 'Any' : 'or click to choose one. Any'} audio or video file with singing.`;
+  $('import-go').disabled = !file;
+}
+
+function closeImport() {
+  importAbort?.abort();
+  $('import').hidden = true;
+}
+
+function renderSteps(current, progress, note) {
+  const at = STEPS.findIndex((s) => s.key === current);
+  $('import-steps').innerHTML = STEPS.map((s, i) => {
+    const state = i < at ? 'done' : i === at ? 'on' : '';
+    const pct = i === at && progress != null ? Math.round(progress * 100) : null;
+    return `<li class="${state}"><span class="ico"></span><span>${s.label}</span><span class="pct">${pct != null ? `${pct}%` : ''}</span>
+      ${i === at && note ? `<span class="sub">${escapeHtml(note)}</span>` : ''}
+      ${i === at && pct != null ? `<span class="bar"><i style="width:${pct}%"></i></span>` : ''}</li>`;
+  }).join('');
+}
+
+async function runImport() {
+  const file = importFile;
+  if (!file) return;
+  $('import-pick').hidden = true;
+  $('import-run').hidden = false;
+  $('import-file-label').textContent = file.name;
+  $('import-run-note').textContent = '';
+  importAbort = new AbortController();
+  const signal = importAbort.signal;
+  let last = 0;
+  const stage = (name, p) => {
+    const [step, note] = STAGE[name] || [name];
+    const now = performance.now();
+    if (p > 0 && p < 1 && now - last < 120) return;
+    last = now;
+    renderSteps(step, p, note);
+  };
+  renderSteps('read', 0);
+  const t0 = performance.now();
+  try {
+    const { importSong } = await import('./import/importer.js');
+    const rec = await importSong(file, { lyrics: $('import-lyrics').value, server: SERVER, signal, stage });
+    renderSteps('save', null);
+    await saveUserSong(rec);
+    const song = userSong(rec);
+    SONGS.push(song);
+    renderSelect();
+    select(SONGS.length - 1);
+    $('import').hidden = true;
+    $('import-lyrics').value = '';
+    const secs = Math.round((performance.now() - t0) / 1000);
+    toast(`“${rec.title}” is ready: ${rec.chart.lines.length} lines found in ${secs} s. Press Sing.`, 'ok');
+    window.__gv.imported = { id: rec.id, lines: rec.chart.lines.length, secs, where: rec.where, language: rec.chart.language };
+  } catch (err) {
+    if (err?.name === 'AbortError') return;
+    console.error(err);
+    $('import-run-note').textContent = `That didn't work: ${err.message || err}`;
+    $('import-cancel').textContent = 'Back';
+    window.__gv.importError = String(err?.message || err);
+  } finally {
+    importAbort = null;
+  }
+}
+
+$('btn-add-song').addEventListener('click', () => openImport());
+$('import-close').addEventListener('click', closeImport);
+$('import-cancel').addEventListener('click', () => {
+  importAbort?.abort();
+  $('import-cancel').textContent = 'Cancel';
+  $('import-pick').hidden = false;
+  $('import-run').hidden = true;
+});
+$('import-file').addEventListener('change', (e) => e.target.files[0] && setImportFile(e.target.files[0]));
+$('import-go').addEventListener('click', runImport);
+for (const ev of ['dragenter', 'dragover']) {
+  document.addEventListener(ev, (e) => {
+    if (document.body.dataset.screen !== 'select' || !e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    $('drop').classList.add('over');
+  });
+}
+document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) $('drop').classList.remove('over'); });
+document.addEventListener('drop', (e) => {
+  if (document.body.dataset.screen !== 'select') return;
+  e.preventDefault();
+  $('drop').classList.remove('over');
+  const file = e.dataTransfer.files[0];
+  if (!file || importAbort) return;
+  if ($('import').hidden) openImport(file);
+  else setImportFile(file);
+});
+
+// Two taps to remove a song you added: the first arms the button.
+$('btn-remove-song').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const song = SONGS[selIndex];
+  if (!song?.user) return;
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Tap again to remove';
+    setTimeout(() => { if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = 'Remove'; } }, 3000);
+    return;
+  }
+  await deleteUserSong(song.id);
+  SONGS.splice(selIndex, 1);
+  releaseSong(song);
+  renderSelect();
+  select(Math.min(selIndex, SONGS.length - 1));
+});
+
 // ---------- Keyboard ----------
 document.addEventListener('keydown', (e) => {
-  if (e.target.matches('input, select, textarea')) return;
+  if (e.key === 'Escape' && !$('import').hidden) return closeImport();
+  if (e.target.matches('input, select, textarea') || !$('import').hidden) return;
   const screen = document.body.dataset.screen;
   if (screen === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); enterSelect(); }
   else if (screen === 'select') {
@@ -754,22 +997,27 @@ document.addEventListener('keydown', (e) => {
 show('title');
 setStage('img/stage-title.jpg');
 setTheme(SONGS[selIndex]);
+window.__gv.songs = () => loadUserSongs().then(() => SONGS.map((s) => ({ id: s.id, title: s.title, user: !!s.user })));
 
-// Automation and test hook: ?autoplay=<song>&input=demo|mic|<audio url>&lyrics=1&difficulty=normal
+// Automation and test hook: ?autoplay=<song id>&input=demo|mic|<audio url>&lyrics=1&difficulty=normal&players=Ann,Ben
+// (players makes the recorded singer's part go round those names, two lines each).
 if (params.get('autoplay')) {
-  const i = SONGS.findIndex((s) => s.id === params.get('autoplay'));
-  if (i >= 0) selIndex = i;
   const input = params.get('input') || 'demo';
   const opts = {
     mode: input === 'demo' ? 'demo' : input === 'mic' ? 'mic' : 'file',
     url: input,
     name: params.get('name') || undefined,
+    players: params.get('players')?.split(',') || undefined,
     audible: params.get('audible') === '1',
     lyrics: params.has('lyrics') ? params.get('lyrics') === '1' : undefined,
     difficulty: params.get('difficulty') || undefined,
     guide: params.get('guide') || undefined,
   };
-  if (opts.lyrics) ensureChecker();
-  window.__gv.start = () => startGame(opts);
-  if (params.get('wait') !== '1') ensureEngine().then(() => startGame(opts));
+  loadUserSongs().then(() => {
+    const i = SONGS.findIndex((s) => s.id === params.get('autoplay'));
+    if (i >= 0) selIndex = i;
+    if (opts.lyrics) ensureChecker();
+    window.__gv.start = () => startGame(opts);
+    if (params.get('wait') !== '1') ensureEngine().then(() => startGame(opts));
+  });
 }

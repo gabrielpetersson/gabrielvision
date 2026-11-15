@@ -36,7 +36,7 @@
       <p class="hint">or press Enter · best with headphones</p>
     </div>
     <footer class="title-foot">
-      <span>Songs everyone knows</span><span>Pitch scoring</span><span>Lyric check</span><span>Up to 2 singers</span>
+      <span>Any song you upload</span><span>Pitch scoring</span><span>Lyric check</span><span>Take turns with friends</span>
     </footer>
   </section>
 
@@ -52,16 +52,26 @@
       <div class="picker">
         <div class="carousel" id="carousel" role="listbox" aria-label="Songs"></div>
         <div class="song-info">
-          <h2 id="song-title">Jingle Bells</h2>
+          <h2 id="song-title"></h2>
           <p class="credit" id="song-credit"></p>
           <div class="chips" id="song-chips"></div>
           <p class="best" id="song-best"></p>
         </div>
+        <div class="song-actions">
+          <button class="btn-ghost btn-add" id="btn-add-song" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Add your own song
+          </button>
+          <button class="btn-ghost" id="btn-remove-song" type="button" hidden>Remove</button>
+        </div>
       </div>
       <aside class="setup glass">
         <h3>Who's singing</h3>
+        <div class="seg" id="seg-mode" role="radiogroup" aria-label="How you sing">
+          <button type="button" data-v="together">All at once</button><button type="button" data-v="turns">Take turns</button>
+        </div>
+        <p class="field-note mode-note" id="mode-note"></p>
         <div id="player-rows"></div>
-        <button class="btn-ghost" id="btn-add-player" type="button">+ Add a second singer</button>
+        <button class="btn-ghost" id="btn-add-player" type="button">+ Add a singer</button>
         <div class="field">
           <span class="field-label">Difficulty</span>
           <div class="seg" id="seg-difficulty" role="radiogroup" aria-label="Difficulty">
@@ -100,6 +110,7 @@
     </div>
     <div id="popups" aria-live="polite"></div>
     <div class="countdown" id="countdown" hidden></div>
+    <div class="turn-call" id="turn-call" hidden></div>
     <div class="lyrics" id="lyrics">
       <p class="line-now" id="line-now"></p>
       <p class="line-next" id="line-next"></p>
@@ -138,6 +149,38 @@
       <div class="coach glass" id="coach"></div>
     </div>
   </section>
+
+  <!-- Add your own song -->
+  <div class="overlay" id="import" hidden>
+    <div class="import-card glass" role="dialog" aria-modal="true" aria-labelledby="import-title">
+      <div class="import-head">
+        <h3 id="import-title">Add your own song</h3>
+        <button class="icon-btn" id="import-close" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </div>
+      <div id="import-pick" class="import-body">
+        <label class="drop" id="drop">
+          <input type="file" id="import-file" accept="audio/*,video/*,.mkv,.flac,.ogg,.opus,.m4a,.aac,.wma,.webm,.avi,.mov,.mp4">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l11-2v12" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>
+          <b id="drop-title">Drop a song here</b>
+          <span id="drop-note">or click to choose one. Any audio or video file with singing.</span>
+        </label>
+        <details class="lyrics-box">
+          <summary>Paste the lyrics (optional)</summary>
+          <textarea id="import-lyrics" rows="7" placeholder="One line per row. With the real lyrics, every word and line comes out right."></textarea>
+        </details>
+        <p class="field-note" id="import-where"></p>
+        <button class="btn-primary" id="import-go" type="button" disabled>Make it singable</button>
+      </div>
+      <div id="import-run" class="import-body" hidden>
+        <p class="import-file" id="import-file-label"></p>
+        <ol class="steps" id="import-steps"></ol>
+        <p class="field-note" id="import-run-note"></p>
+        <button class="btn-ghost" id="import-cancel" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <div class="toast" id="toast" role="alert" hidden></div>
 

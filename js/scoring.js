@@ -37,11 +37,15 @@ export const ratingFor = (acc) => RATINGS.find((r) => acc >= r.min);
 export const titleFor = (acc) => TITLES.find((r) => acc >= r.min).title;
 
 export class Performance {
-  constructor(chart, difficulty = 'normal') {
+  // owned: the line indexes this singer sings when friends take turns (null = every line).
+  constructor(chart, difficulty, owned = null) {
     this.diff = DIFFICULTY[difficulty];
+    // Uploaded songs can sit between semitones; sung pitch is compared after removing that offset.
+    this.tuning = chart.tuning ?? 0;
     this.lines = chart.lines.map((line, li) => ({
       ...line,
       index: li,
+      skip: !!owned && !owned.has(li),
       done: false,
       acc: 0,
       points: 0,
@@ -53,6 +57,7 @@ export class Performance {
       line.notes.map((n) => ({
         ...n,
         line: line.index,
+        skip: line.skip,
         weight: POINTS_PER_SECOND * n.d * (n.golden ? 2 : 1),
         frames: 0,
         credit: 0,
@@ -91,10 +96,12 @@ export class Performance {
     return [n.t + lead, n.t + n.d - tail];
   }
 
-  feed(t, midi) {
+  feed(t, sung) {
     this.lastT = t;
     this.completeBefore(t);
-    const n = this.noteAt(t);
+    const midi = sung == null ? null : sung - this.tuning;
+    const found = this.noteAt(t);
+    const n = found?.skip ? null : found;
     let diff = null, c = 0;
     if (n && midi != null) {
       diff = foldDiff(midi, n.p);
@@ -150,6 +157,7 @@ export class Performance {
 
   completeNote(n) {
     n.done = true;
+    if (n.skip) return;
     // Range uses each note's median sung pitch, so single-frame octave slips don't count.
     if (n.sung.length >= 3) {
       const m = [...n.sung].sort((a, b) => a - b)[n.sung.length >> 1];
@@ -172,11 +180,12 @@ export class Performance {
   completeLine(line) {
     const notes = this.notes.filter((n) => n.line === line.index);
     notes.forEach((n) => !n.done && this.completeNote(n));
+    line.done = true;
+    if (line.skip) return;
     const dur = notes.reduce((s, n) => s + n.d, 0);
     line.acc = dur ? notes.reduce((s, n) => s + n.acc * n.d, 0) / dur : 0;
     line.rating = ratingFor(line.acc);
     line.bonus = line.rating.bonus;
-    line.done = true;
     this.score += line.bonus;
     this.events.push({ type: 'line', line, rating: line.rating, acc: line.acc, bonus: line.bonus });
   }
@@ -195,17 +204,19 @@ export class Performance {
 
   finish() {
     this.completeBefore(Infinity);
-    const total = this.lines.reduce((s, l) => s + (l.end - l.start), 0);
+    const lines = this.lines.filter((l) => !l.skip);
+    const notes = this.notes.filter((n) => !n.skip);
+    const total = lines.reduce((s, l) => s + (l.end - l.start), 0);
     const factor = (l) => l.lyric?.factor ?? 1;
-    const accuracy = total ? this.lines.reduce((s, l) => s + l.acc * (l.end - l.start) * factor(l), 0) / total : 0;
-    const pitchAccuracy = total ? this.lines.reduce((s, l) => s + l.acc * (l.end - l.start), 0) / total : 0;
-    const checked = this.lines.filter((l) => l.lyric);
+    const accuracy = total ? lines.reduce((s, l) => s + l.acc * (l.end - l.start) * factor(l), 0) / total : 0;
+    const pitchAccuracy = total ? lines.reduce((s, l) => s + l.acc * (l.end - l.start), 0) / total : 0;
+    const checked = lines.filter((l) => l.lyric);
     const lyricAccuracy = checked.length ? checked.reduce((s, l) => s + l.lyric.ratio, 0) / checked.length : null;
-    const attacks = this.notes
+    const attacks = notes
       .filter((n) => n.attack != null && n.syl !== '~')
       .map((n) => n.attack - n.t - DETECTOR_LAG)
       .sort((a, b) => a - b);
-    const sorted = [...this.lines].sort((a, b) => b.acc - a.acc);
+    const sorted = [...lines].sort((a, b) => b.acc - a.acc);
     const { sum, sq, n } = this.cents;
     return {
       score: this.score,
@@ -214,10 +225,10 @@ export class Performance {
       lyricAccuracy,
       title: titleFor(accuracy),
       stars: Math.max(0, Math.min(5, Math.round(accuracy * 10) / 2)),
-      notesHit: this.notes.filter((x) => x.acc >= HIT_ACCURACY).length,
-      notesTotal: this.notes.length,
-      goldenHit: this.notes.filter((x) => x.golden && x.acc >= HIT_ACCURACY).length,
-      goldenTotal: this.notes.filter((x) => x.golden).length,
+      notesHit: notes.filter((x) => x.acc >= HIT_ACCURACY).length,
+      notesTotal: notes.length,
+      goldenHit: notes.filter((x) => x.golden && x.acc >= HIT_ACCURACY).length,
+      goldenTotal: notes.filter((x) => x.golden).length,
       bestCombo: this.bestCombo,
       centsMean: n > 20 ? sum / n : null,
       centsSpread: n > 20 ? Math.sqrt(Math.max(0, sq / n - (sum / n) ** 2)) : null,
@@ -226,7 +237,7 @@ export class Performance {
       range: Number.isFinite(this.range.lo) ? this.range : null,
       bestLine: sorted[0],
       worstLine: sorted[sorted.length - 1],
-      lines: this.lines.map((l) => ({ text: l.text, acc: l.acc, rating: l.rating?.key, lyric: l.lyric?.ratio ?? null })),
+      lines: lines.map((l) => ({ text: l.text, acc: l.acc, rating: l.rating?.key, lyric: l.lyric?.ratio ?? null })),
     };
   }
 }

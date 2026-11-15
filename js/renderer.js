@@ -44,6 +44,7 @@ export class StageRenderer {
     return this.sprites.get(color);
   }
 
+  // theme: { accent, lineColors? } — lineColors tints each line's notes with its singer when friends take turns.
   setSong(chart, theme) {
     this.chart = chart;
     this.theme = theme;
@@ -101,7 +102,8 @@ export class StageRenderer {
   }
 
   // players: [{ id, color, frames (history with t, disp, credit), live: { midi, credit }, perf }]
-  draw(now, players, beat) {
+  // voices: the pitch comets to draw (one per microphone); defaults to one per player.
+  draw(now, players, beat, voices = players) {
     const { ctx, W, H } = this;
     const dt = this.lastNow == null ? 0 : Math.max(0, Math.min(0.05, now - this.lastNow));
     this.lastNow = now;
@@ -135,10 +137,10 @@ export class StageRenderer {
     }
 
     // Beat grid scrolling with the music.
-    const spb = 60 / this.chart.bpm;
-    const firstBeat = Math.floor((now - pastSecs) / spb);
-    for (let b = firstBeat; b * spb < now + futureSecs; b++) {
-      const xx = Math.round(this.x(b * spb, now)) + 0.5;
+    const spb = 60 / this.chart.bpm, off = this.chart.beatOffset || 0;
+    const firstBeat = Math.floor((now - pastSecs - off) / spb);
+    for (let b = firstBeat; off + b * spb < now + futureSecs; b++) {
+      const xx = Math.round(this.x(off + b * spb, now)) + 0.5;
       const bar = b % this.chart.beatsPerBar === 0;
       ctx.fillStyle = bar ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.035)';
       ctx.fillRect(xx, bandTop, 1, bandBot - bandTop);
@@ -174,8 +176,8 @@ export class StageRenderer {
     // Pitch trails and comets.
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    for (const pl of players) this.drawTrail(pl, now, pastSecs);
-    for (const pl of players) this.drawComet(pl, now, dt);
+    for (const v of voices) this.drawTrail(v, now, pastSecs);
+    for (const v of voices) this.drawComet(v, now, dt);
     this.drawParticles(dt);
     ctx.restore();
   }
@@ -188,7 +190,7 @@ export class StageRenderer {
     const h = this.noteH;
     const yc = this.y(n.p);
     const y0 = yc - h / 2;
-    const color = n.golden ? GOLD : accent;
+    const color = n.golden ? GOLD : this.theme.lineColors?.[n.line] ?? accent;
     const active = now >= n.t && now <= n.t + n.d;
     const done = n.done;
     const missed = done && players.every((pl) => (pl.perf.notes[i]?.acc ?? 0) < 0.5);
