@@ -1,33 +1,11 @@
-// Reads the separated vocal on this device: pitch every 10 ms (YIN) and the sung words with timings (Whisper).
+// Writes down the sung words of the separated vocal on this device, with timings (Whisper), region by region.
 import { pipeline, env, Tensor } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1';
-import { Yin } from '../pitch.js';
-import { vocalRegions } from '../import/regions.js';
 
 env.allowLocalModels = false;
 const MODEL = 'onnx-community/whisper-base_timestamped';
 const RATE = 16000;
-const HOP = 160;
 
 const post = (stage, value) => postMessage({ type: 'progress', stage, value });
-
-// YIN over the whole vocal: Float32Arrays of hz, clarity and rms per 10 ms hop (frame centre at i * 10 ms).
-function trackPitch(audio) {
-  const size = 1024, yin = new Yin(RATE, size);
-  const n = Math.floor(audio.length / HOP);
-  const hz = new Float32Array(n), clarity = new Float32Array(n), rms = new Float32Array(n);
-  const win = new Float32Array(size);
-  for (let i = 0; i < n; i++) {
-    const start = i * HOP - size / 2;
-    for (let j = 0; j < size; j++) {
-      const k = start + j;
-      win[j] = k >= 0 && k < audio.length ? audio[k] : 0;
-    }
-    const r = yin.detect(win);
-    hz[i] = r.hz; clarity[i] = r.clarity; rms[i] = r.rms;
-    if (i % 2000 === 0) post('pitch', i / n);
-  }
-  return { hz, clarity, rms, hop: HOP / RATE };
-}
 
 // Whisper runs on the CPU in 8-bit: the GPU builds of this model either return garbage (fp16) or need a
 // 206 MB download (fp32), while int8 on WebAssembly is a 77 MB download and takes seconds per sung region.
@@ -63,14 +41,8 @@ async function detectLanguage(asr, audio) {
 }
 
 onmessage = async (e) => {
-  const { audio, words: given, language: forced } = e.data;
+  const { audio, regions, language: forced } = e.data;
   try {
-    const pitch = trackPitch(audio);
-    post('pitch', 1);
-    const regions = vocalRegions(pitch.rms, pitch.hop);
-    const transfer = [pitch.hz.buffer, pitch.clarity.buffer, pitch.rms.buffer];
-    // The server already wrote down the words.
-    if (given) return postMessage({ type: 'done', language: forced, words: given, regions, pitch }, transfer);
     const asr = await loadAsr();
     post('words', 0);
     // Detect the language on the regions with the most singing (first 30 s of them).
@@ -95,7 +67,7 @@ onmessage = async (e) => {
       }
       post('words', (i + 1) / regions.length);
     }
-    postMessage({ type: 'done', language, words, regions, pitch }, transfer);
+    postMessage({ type: 'done', language, words });
   } catch (err) {
     postMessage({ type: 'error', message: String(err?.message || err) });
   }

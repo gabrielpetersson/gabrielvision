@@ -1,7 +1,7 @@
 // Builds a game chart from a separated vocal: note bars from the pitch track, words placed on those bars,
 // syllables per bar, and lyric lines. Pure function (no DOM), so Node tests run it on recorded data.
 //
-// Data shape in:  pitch { hop, hz[], clarity[], rms[] } (frame i centred at i·hop seconds),
+// Data shape in:  pitch { hop, hz[] (0 = not sung), rms[] } (frame i centred at i·hop seconds),
 //                 words [{ text, start, end }] from speech recognition, optional pasted lyrics text.
 // Data shape out: the chart format of songs/<id>/chart.json, plus `tuning` (semitones the song sits off A440)
 //                 and `beatOffset` (seconds to the first beat).
@@ -15,12 +15,12 @@ const median = (xs) => {
 };
 
 // ---------- Pitch frames ----------
-function toFrames({ hz, clarity, rms, hop }) {
+function toFrames({ hz, rms, hop }) {
   const n = hz.length;
   const db = Array.from(rms, (r) => 20 * Math.log10(r + 1e-9));
   const ref = median(db.filter((d) => d > -90).sort((a, b) => a - b).slice(-Math.ceil(n * 0.1)));
   const m = new Array(n).fill(null);
-  for (let i = 0; i < n; i++) if (hz[i] >= 65 && hz[i] <= 1050 && clarity[i] >= 0.8 && db[i] >= ref - 30) m[i] = hzToMidi(hz[i]);
+  for (let i = 0; i < n; i++) if (hz[i] >= 65 && hz[i] <= 1050 && db[i] >= ref - 30) m[i] = hzToMidi(hz[i]);
   // Bridge one- or two-frame dropouts inside a steady tone, then drop islands shorter than 50 ms.
   for (let i = 1; i < n - 1; i++) {
     if (m[i] != null) continue;

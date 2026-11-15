@@ -6,9 +6,11 @@ import { estimateTempo } from './tempo.js';
 import { encodeWav } from './wav.js';
 import { readTags } from './tags.js';
 import { accentsFor, makeCover, makeStage } from './art.js';
+import { vocalRegions } from './regions.js';
 
 const RATE = 44100;
 const MODEL_URL = new URL('../../models/Kim_Vocal_2.onnx', import.meta.url).href;
+const PITCH_MODEL_URL = new URL('../../models/fcpe.onnx', import.meta.url).href;
 const MAX_SECONDS = 10 * 60;
 
 // 'webgpu' when this browser can run the models on the GPU, else null.
@@ -66,10 +68,16 @@ export async function separateOnDevice(left, right, device, onProgress, signal) 
   return { left: res.left, right: res.right };
 }
 
-// Pitch every 10 ms, plus words and language unless the server sent them already.
-export function readVocal(vocal16k, { words, language }, onProgress, signal) {
+// The sung note every 10 ms: { hop, hz (0 = not sung), rms }.
+export async function trackPitch(vocal16k, device, onProgress, signal) {
   const audio = vocal16k.slice();
-  return runWorker(new URL('../workers/transcribe-worker.js', import.meta.url), { audio, words, language }, [audio.buffer], onProgress, signal);
+  return (await runWorker(new URL('../workers/pitch-worker.js', import.meta.url), { audio, modelUrl: PITCH_MODEL_URL, device }, [audio.buffer], onProgress, signal)).pitch;
+}
+
+// The sung words with timings, and the language, from the regions where someone sings.
+export function readWords(vocal16k, { regions, language }, onProgress, signal) {
+  const audio = vocal16k.slice();
+  return runWorker(new URL('../workers/transcribe-worker.js', import.meta.url), { audio, regions, language }, [audio.buffer], onProgress, signal);
 }
 
 // Native resampling: any channels at any rate to mono at `rate`.
@@ -114,14 +122,16 @@ export async function importSong(file, { lyrics = '', server, signal, stage = ()
   }
   const [vocal16k, inst11k] = await Promise.all([resample([vocals.left, vocals.right], 16000), resample(inst, 11025)]);
   stage('lyrics', 0);
-  const read = await readVocal(vocal16k, { words, language }, (s, p) => stage(s === 'model' ? 'lyrics-model' : s, p), signal);
+  const pitch = await trackPitch(vocal16k, device || 'wasm', stage, signal);
+  // The server already wrote down the words.
+  if (!words) ({ words, language } = await readWords(vocal16k, { regions: vocalRegions(pitch.rms, pitch.hop), language }, (s, p) => stage(s === 'model' ? 'lyrics-model' : s, p), signal));
   stage('lyrics', 1);
 
   stage('notes', 0);
   const tempo = estimateTempo(inst11k, 11025);
   const title = tags.title || file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'My song';
   const artist = tags.artist || '';
-  const chart = buildChart({ pitch: read.pitch, words: read.words, lyrics, duration: buffer.duration, tempo, title, artist, language: read.language });
+  const chart = buildChart({ pitch, words, lyrics, duration: buffer.duration, tempo, title, artist, language });
   if (chart.lines.length < 2) throw new Error('No singing found in that file. Try a song with vocals.');
   stage('notes', 1);
 

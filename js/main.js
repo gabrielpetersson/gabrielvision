@@ -1181,7 +1181,7 @@ const STEPS = [
 const STAGE = {
   read: ['read'], download: ['separate', 'Loading the voice model (a 67 MB download the first time)'], separate: ['separate'],
   upload: ['separate', 'Uploading to our server'], server: ['separate', 'Our server is separating the voice and writing down the words'],
-  pitch: ['lyrics', 'Tracking the melody'], 'lyrics-model': ['lyrics', 'Loading the speech model (a 77 MB download the first time)'],
+  pitch: ['lyrics', 'Tracking the melody'], 'pitch-model': ['lyrics', 'Loading the melody model (a 43 MB download the first time)'], 'lyrics-model': ['lyrics', 'Loading the speech model (a 77 MB download the first time)'],
   words: ['lyrics', 'Writing down the words'], lyrics: ['lyrics'], notes: ['notes'], save: ['save'],
 };
 let importFile = null;
