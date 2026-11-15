@@ -10,7 +10,10 @@ Play: https://gabrielpetersson.github.io/gabrielvision/ (Chrome, Edge, Firefox o
 from the music, writes down the words and finds the notes, all on your device (needs a browser with WebGPU,
 such as Chrome or Edge on a laptop). Paste the lyrics for exact lines. Uploaded songs stay in your browser.
 
-**Take turns.** Pass one mic around: each singer gets two lines, then the next one is up (up to six singers).
+**Sing with friends.** Press "Sing with friends", copy the invite link and send it. Everyone sings on their own
+device, the song starts at the same moment for all, and scores show live. Pick "Take turns" for two lines each.
+
+**Take turns on one device.** Under "Sing alone", pass one mic around: each singer gets two lines, then the next one is up (up to six singers).
 Or sing together, two singers on two mics.
 
 Built-in songs are public-domain compositions (Twinkle, Twinkle, Little Star; Happy Birthday to You;

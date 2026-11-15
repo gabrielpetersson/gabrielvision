@@ -7,6 +7,7 @@ import { SONGS, loadChart, userSong, releaseSong } from './songs.js';
 import { midiName } from './pitch.js';
 import { listUserSongs, saveUserSong, deleteUserSong } from './import/song-store.js';
 import { SERVER } from './import/server.js';
+import { Room, inviteLink, roomInLink } from './room.js';
 
 const $ = (id) => document.getElementById(id);
 const PLAYER_COLORS = ['#6EF3FF', '#FF77B7', '#B8FF6B', '#FFB547', '#A98BFF', '#FF8A5B'];
@@ -68,7 +69,7 @@ function ensureChecker(language = SONGS[selIndex]?.chartData?.language ?? null) 
 
 // ---------- Screens & stage ----------
 function show(name) {
-  for (const s of ['title', 'select', 'game', 'results']) $(`${s}-screen`).hidden = s !== name;
+  for (const s of ['title', 'select', 'room', 'game', 'results']) $(`${s}-screen`).hidden = s !== name;
   document.body.dataset.screen = name;
   $('stage').hidden = name !== 'game';
   fx.active = name === 'title' || name === 'results';
@@ -386,7 +387,8 @@ function addToBoard(songId, entry) {
 async function startGame(opts) {
   lastGameOpts = opts;
   stopMonitors();
-  const song = SONGS[selIndex];
+  // In a room the room says which song; everyone else is on their own device.
+  const song = opts.mode === 'room' ? SONGS.find((s) => s.id === opts.song) : SONGS[selIndex];
   show('game');
   setTheme(song);
   setStage(song.stage);
@@ -400,19 +402,22 @@ async function startGame(opts) {
     await ensureEngine();
     const [chart, inst, vocals] = await Promise.all([loadChart(song), engine.load(song.inst), engine.load(song.vocals)]);
     const difficulty = opts.difficulty || settings.difficulty;
-    // Who sings: the setup panel's singers with mics, or one recorded singer for the demo and tests.
-    const turnsMode = opts.mode === 'mic' ? settings.mode === 'turns' : !!opts.players;
-    const names = opts.mode === 'mic'
-      ? settings.players.slice(0, MAX_PLAYERS[settings.mode]).map((p) => p.name)
+    const inRoom = opts.mode === 'room';
+    // Who sings: the room's people (only this device's one sings here), the setup panel's singers with mics,
+    // or one recorded singer for the demo and tests.
+    const turnsMode = inRoom ? opts.turns : opts.mode === 'mic' ? settings.mode === 'turns' : !!opts.players;
+    const names = inRoom ? opts.members.map((m) => m.name)
+      : opts.mode === 'mic' ? settings.players.slice(0, MAX_PLAYERS[settings.mode]).map((p) => p.name)
       : opts.players || [opts.mode === 'demo' ? 'Demo singer' : opts.name || 'Test singer'];
     const turns = turnsMode && names.length > 1;
+    const local = inRoom ? opts.members.findIndex((m) => m.id === opts.me) : -1;
     const sourceFor = async (i) => opts.mode === 'demo' ? { buffer: vocals, audible: true }
-      : opts.mode === 'file' ? { buffer: await engine.load(opts.url), audible: opts.audible }
+      : opts.mode === 'file' || opts.singer ? { buffer: await engine.load(opts.url || opts.singer), audible: opts.audible }
       : { stream: await getStream(i) };
     const lyricsOn = opts.lyrics ?? settings.lyrics;
     if (lyricsOn) ensureChecker(chart.language ?? null);
     const inputs = [];
-    for (let i = 0; i < (turns ? 1 : names.length); i++) {
+    for (let i = 0; i < (inRoom || turns ? 1 : names.length); i++) {
       const input = new VoiceInput(engine, await sourceFor(i), { latency: settings.latency / 1000 });
       await input.connect();
       input.enablePcm(lyricsOn);
@@ -421,22 +426,37 @@ async function startGame(opts) {
     // Taking turns: lines go out in pairs, round-robin.
     const owners = chart.lines.map((_, i) => (turns ? Math.floor(i / LINES_PER_TURN) % names.length : null));
     const players = names.map((name, i) => {
-      const group = inputs[turns ? 0 : i];
+      const color = PLAYER_COLORS[inRoom ? opts.members[i].color : i];
+      // Friends in a room sing on their own devices: here they are a name and the score their device sends.
+      if (inRoom && i !== local) return { id: `p${i}`, member: opts.members[i].id, name, color, remote: {}, shown: 0 };
+      const group = inputs[inRoom || turns ? 0 : i];
       const owned = turns ? new Set(owners.flatMap((o, li) => (o === i ? [li] : []))) : null;
-      const p = { id: `p${i}`, name, color: PLAYER_COLORS[i], input: group.input, frames: group.input.history, perf: new Performance(chart, difficulty, owned), shown: 0 };
+      const p = { id: `p${i}`, member: inRoom ? opts.me : null, name, color, input: group.input, frames: group.input.history, perf: new Performance(chart, difficulty, owned), shown: 0 };
       group.players.push(p);
       return p;
     });
-    const voices = turns ? [{ id: 'mic', color: players[0].color, frames: inputs[0].input.history, live: null }] : players;
+    const scored = players.filter((p) => p.perf);
+    const voices = turns && !inRoom ? [{ id: 'mic', color: players[0].color, frames: inputs[0].input.history, live: null }] : scored;
     if (!renderer) renderer = new StageRenderer($('stage'));
     renderer.setSong(chart, { accent: song.accent, lineColors: turns ? owners.map((o) => players[o].color) : null });
     renderer.resize();
     buildHud(players, turns);
     $('game-title').textContent = song.title;
+    const guide = opts.mode === 'demo' || opts.mode === 'file' || opts.singer ? 0 : GUIDE_LEVEL[opts.guide || settings.guide];
+    game = { song, chart, players, scored, inputs, voices, turns, owners, opts, difficulty, lyricsOn, inRoom, round: opts.round, pendingChecks: 0, lineShown: -1, ended: false, beatsShown: new Set(), active: -1, sentAt: 0 };
+    // A room's song starts at the same moment on every device; someone who arrives late joins mid-song.
+    let offset = 0;
+    if (inRoom) {
+      for (;;) {
+        const wait = opts.startAt - room.serverNow();
+        if (wait <= 160) { offset = Math.max(0, -wait / 1000 - 0.15); break; }
+        $('loading-text').textContent = `Starting in ${Math.ceil(wait / 1000)}…`;
+        await new Promise((r) => setTimeout(r, Math.min(250, wait - 150)));
+        if (game?.ended) return;
+      }
+    }
     $('loading').hidden = true;
-    const guide = opts.mode === 'demo' || opts.mode === 'file' ? 0 : GUIDE_LEVEL[opts.guide || settings.guide];
-    game = { song, chart, players, inputs, voices, turns, owners, opts, difficulty, lyricsOn, pendingChecks: 0, lineShown: -1, ended: false, beatsShown: new Set(), active: -1 };
-    const at = engine.play({ inst, vocals, guide });
+    const at = engine.play({ inst, vocals, guide, offset });
     inputs.forEach((g) => g.input.startWithSong(at));
     window.__gv.status = 'playing';
     requestAnimationFrame(tick);
@@ -445,8 +465,11 @@ async function startGame(opts) {
     $('loading').hidden = true;
     if (err?.name?.endsWith('Error') && /Allowed|NotFound|Overconstrained/.test(err.name)) micError(err);
     else toast(err.message || String(err));
-    show('select');
-    renderSelect();
+    if (opts.mode === 'room') showRoom();
+    else {
+      show('select');
+      renderSelect();
+    }
     window.__gv.status = 'error';
     window.__gv.error = String(err?.message || err);
   }
@@ -506,12 +529,13 @@ function tick() {
       }
     }
   }
-  for (const p of players) {
+  for (const p of game.scored) {
     p.frames = p.input.history;
     p.live = p.perf.live;
     for (const ev of p.perf.events.splice(0)) handleEvent(p, ev);
   }
-  if (game.turns) {
+  // One shared mic in this room: the comet takes the colour of whoever's turn it is.
+  if (game.turns && !game.inRoom) {
     const a = players[game.owners[lineAt(now)]];
     Object.assign(game.voices[0], { color: a.color, live: a.perf.live, frames: game.inputs[0].input.history });
   }
@@ -521,7 +545,12 @@ function tick() {
   const downbeat = Math.round(beat) % chart.beatsPerBar === 0;
   const pulse = Math.exp(-phase * 5) * (downbeat ? 1 : 0.6);
   document.getElementById('bg').style.setProperty('--pulse', pulse.toFixed(3));
-  renderer.draw(now, players, { pulse }, game.voices);
+  renderer.draw(now, game.scored, { pulse }, game.voices);
+  if (game.inRoom && performance.now() - game.sentAt > 900) {
+    game.sentAt = performance.now();
+    const me = game.scored[0];
+    room?.send({ live: { round: game.round, score: me.perf.score, mult: me.perf.multiplier, combo: me.perf.combo } });
+  }
   updateLyrics(now);
   updateHud(now);
   countdown(now, spb);
@@ -655,13 +684,14 @@ function updateHud(now) {
     players.forEach((p, i) => $(`${p.id}-card`).classList.toggle('active', i === active));
   }
   for (const p of players) {
-    p.shown += (p.perf.score - p.shown) * 0.18;
-    if (Math.abs(p.perf.score - p.shown) < 1) p.shown = p.perf.score;
+    const { score = 0, mult = 1, combo = 0 } = p.perf ? { score: p.perf.score, mult: p.perf.multiplier, combo: p.perf.combo } : p.remote;
+    p.shown += (score - p.shown) * 0.18;
+    if (Math.abs(score - p.shown) < 1) p.shown = score;
     $(`${p.id}-score`).textContent = fmtNum(p.shown);
     const m = $(`${p.id}-mult`);
-    m.dataset.m = p.perf.multiplier;
-    m.textContent = `×${p.perf.multiplier}`;
-    $(`${p.id}-streak`).textContent = p.perf.combo >= 3 ? `${p.perf.combo} note streak` : '';
+    m.dataset.m = mult;
+    m.textContent = `×${mult}`;
+    $(`${p.id}-streak`).textContent = combo >= 3 ? `${combo} note streak` : '';
   }
   $('progress-fill').style.width = `${Math.max(0, Math.min(100, (now / chart.duration) * 100))}%`;
   $('game-time').textContent = `${fmtTime(now)} / ${fmtTime(chart.duration)}`;
@@ -694,9 +724,14 @@ async function endGame() {
     $('loading').hidden = true;
   }
   g.inputs.forEach(({ input }) => input.disconnect());
-  const results = g.players.map((p) => ({ name: p.name, color: p.color, ...p.perf.finish() }));
+  const results = g.scored.map((p) => ({ name: p.name, color: p.color, member: p.member, ...p.perf.finish() }));
   window.__gv.results = results.map(({ bestLine, worstLine, ...r }) => ({ ...r, bestLine: bestLine?.text, worstLine: worstLine?.text }));
   window.__gv.status = 'done';
+  if (g.inRoom) {
+    const r = results[0];
+    room?.send({ result: { round: g.round, score: r.score, accuracy: r.accuracy, title: r.title, stars: r.stars } });
+    return showResults(g, results, []);
+  }
   let board = leaderboard(g.song.id);
   if (g.opts.mode === 'mic') {
     for (const r of results) board = addToBoard(g.song.id, { name: r.name, score: r.score, acc: r.accuracy, difficulty: g.difficulty, at: Date.now() });
@@ -737,8 +772,9 @@ $('btn-restart').addEventListener('click', async () => {
 $('btn-quit').addEventListener('click', async () => {
   $('pause').hidden = true;
   await engine.unpause();
+  const inRoom = game?.inRoom;
   stopGame();
-  enterSelect();
+  inRoom ? showRoom() : enterSelect();
 });
 $('opt-latency').addEventListener('input', (e) => {
   settings.latency = +e.target.value;
@@ -755,25 +791,51 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 
 function showResults(g, results, board) {
   show('results');
-  const ranked = [...results].sort((a, b) => b.score - a.score);
+  lastResults = { g, results };
   $('res-kicker').textContent = `${DIFFICULTY[g.difficulty].label}${g.turns ? ' · Taking turns' : ''} · Results`;
   $('res-title').textContent = g.song.title;
+  $('btn-back-room').hidden = !g.inRoom;
+  $('btn-again').hidden = g.inRoom;
+  $('btn-songs').hidden = g.inRoom;
+  $('leaderboard').hidden = g.inRoom;
+  delete $('ranking').dataset.key;
+  renderRanking(g, results);
+  if (!g.inRoom) {
+    const names = new Set(results.map((r) => r.name));
+    $('leaderboard').innerHTML = board.length
+      ? `<h4>Top scores on this device</h4><ol>${board.slice(0, 5).map((e) => `<li class="${names.has(e.name) && results.some((r) => r.score === e.score) ? 'me' : ''}"><b>${escapeHtml(e.name)}</b><span>${fmtNum(e.score)}</span></li>`).join('')}</ol>`
+      : '<h4>Top scores on this device</h4><p class="field-note">Sing with your mic to get on the board.</p>';
+  }
+  renderCoach(results, 0);
+  if (Math.max(...results.map((r) => r.accuracy)) >= 0.65) setTimeout(() => fx.celebrate(), 400);
+}
+
+// In a room, friends' scores arrive from their devices as they finish; the list fills in as they do.
+let lastResults = null;
+function renderRanking(g, results) {
+  const entries = [...results];
+  if (g.inRoom) {
+    for (const p of g.players) {
+      if (p.perf) continue;
+      const r = room?.view?.members.find((m) => m.id === p.member)?.result;
+      entries.push(r?.round === g.round ? { name: p.name, color: p.color, ...r } : { name: p.name, color: p.color, score: p.remote.score || 0, pending: true });
+    }
+  }
+  const ranked = entries.sort((a, b) => b.score - a.score);
+  const key = ranked.map((r) => `${r.name}:${r.score}:${!!r.pending}`).join('|');
+  if (key === $('ranking').dataset.key) return;
+  const first = !$('ranking').dataset.key;
+  $('ranking').dataset.key = key;
   $('ranking').innerHTML = ranked
     .map((r, i) => `
-      <li class="rank-row ${i === 0 ? 'win' : ''}" style="--c:${r.color}; animation-delay:${i * 0.25}s">
+      <li class="rank-row ${i === 0 && !r.pending ? 'win' : ''}" style="--c:${r.color}; animation-delay:${first ? i * 0.25 : 0}s">
         <span class="rank-num">${i + 1}</span>
-        <span class="rank-name"><b>${escapeHtml(r.name)}${i === 0 && ranked.length > 1 ? '<span class="douze">12 points</span>' : ''}</b>
-          <span><span class="title-badge">${r.title}</span> · ${stars(r.stars)}</span></span>
-        <span class="rank-score"><b data-count="${r.score}">0</b><span>${pct(r.accuracy)} accuracy</span></span>
+        <span class="rank-name"><b>${escapeHtml(r.name)}${i === 0 && ranked.length > 1 && !r.pending ? '<span class="douze">12 points</span>' : ''}</b>
+          <span>${r.pending ? 'Still singing…' : `<span class="title-badge">${r.title}</span> · ${stars(r.stars)}`}</span></span>
+        <span class="rank-score"><b data-count="${r.score}">${first ? 0 : fmtNum(r.score)}</b><span>${r.pending ? '' : `${pct(r.accuracy)} accuracy`}</span></span>
       </li>`)
     .join('');
-  for (const el of $('ranking').querySelectorAll('[data-count]')) countUp(el, +el.dataset.count);
-  const names = new Set(results.map((r) => r.name));
-  $('leaderboard').innerHTML = board.length
-    ? `<h4>Top scores on this device</h4><ol>${board.slice(0, 5).map((e) => `<li class="${names.has(e.name) && results.some((r) => r.score === e.score) ? 'me' : ''}"><b>${escapeHtml(e.name)}</b><span>${fmtNum(e.score)}</span></li>`).join('')}</ol>`
-    : '<h4>Top scores on this device</h4><p class="field-note">Sing with your mic to get on the board.</p>';
-  renderCoach(results, 0);
-  if (ranked[0].accuracy >= 0.65) setTimeout(() => fx.celebrate(), 400);
+  if (first) for (const el of $('ranking').querySelectorAll('[data-count]')) countUp(el, +el.dataset.count);
 }
 
 function countUp(el, target) {
@@ -830,6 +892,170 @@ function renderCoach(results, idx) {
 $('btn-again').addEventListener('click', () => startGame(lastOpts()));
 $('btn-songs').addEventListener('click', () => enterSelect());
 const lastOpts = () => lastGameOpts || { mode: 'mic' };
+
+// ---------- Sing with friends: rooms ----------
+// Everyone opens the invite link on their own device. The host picks a song and starts; the song starts on every
+// device at the same moment, each person sings into their own mic, and scores travel through the room service.
+let room = null;
+let roomMonitor = null;
+let roomPlayed = 0;
+const roomSongs = () => SONGS.filter((s) => !s.user);
+const myName = () => settings.players[0]?.name || 'Singer';
+
+async function enterRoom(code) {
+  await ensureEngine();
+  room?.leave();
+  room = new Room(onRoomUpdate);
+  roomPlayed = 0;
+  showRoom();
+  $('room-status').textContent = code ? 'Joining…' : 'Making your room…';
+  try {
+    const joined = await room.enter(code, myName());
+    history.replaceState(null, '', `#room=${joined}`);
+    window.__gv.room = joined;
+    // Don't drop into a song that has been playing for a while; wait for the next one.
+    const r = room.view.room;
+    if (r.startAt && room.serverNow() - r.startAt > 15000) roomPlayed = r.round;
+  } catch (err) {
+    toast(err.message || String(err));
+    leaveRoom();
+  }
+}
+
+function showRoom() {
+  show('room');
+  setStage('img/stage-title.jpg');
+  $('room-name').value = myName();
+  renderRoom();
+  connectRoomMic();
+}
+
+function leaveRoom() {
+  room?.leave();
+  room = null;
+  roomMonitor?.disconnect();
+  roomMonitor = null;
+  history.replaceState(null, '', location.pathname + location.search);
+  show('title');
+  setStage('img/stage-title.jpg');
+}
+
+function onRoomUpdate(view) {
+  if (!view) return;
+  const r = view.room;
+  // The host started a new song: play it (also from the results of the last one).
+  if (r.round > roomPlayed && r.startAt && room.serverNow() - r.startAt < 15000 && !(game && !game.ended)) {
+    roomPlayed = r.round;
+    roomMonitor?.disconnect();
+    roomMonitor = null;
+    const members = r.roster.map((id) => view.members.find((m) => m.id === id)).filter(Boolean);
+    startGame({ mode: 'room', song: r.song, turns: r.mode === 'turns', difficulty: r.difficulty, members, me: view.me, round: r.round, startAt: r.startAt, singer: roomSinger });
+    return;
+  }
+  if (game && !game.ended && game.inRoom) {
+    for (const p of game.players) if (!p.perf) p.remote = view.members.find((m) => m.id === p.member)?.live?.round === game.round ? view.members.find((m) => m.id === p.member).live : p.remote;
+  }
+  if (document.body.dataset.screen === 'results' && lastResults?.g.inRoom) renderRanking(lastResults.g, lastResults.results);
+  if (document.body.dataset.screen === 'room') renderRoom();
+}
+
+function renderRoom() {
+  const view = room?.view;
+  $('room-code').innerHTML = view ? `Room <b>${view.room.code}</b>` : '';
+  if (!view) return;
+  const { members, me, isHost } = view;
+  const r = view.room;
+  $('room-people').innerHTML = members
+    .map((m) => `<li class="${m.here ? '' : 'away'}" style="--c:${PLAYER_COLORS[m.color]}"><span class="dot"></span><span>${escapeHtml(m.name)}</span><em>${[m.id === r.host ? 'host' : '', m.id === me ? 'you' : '', m.here ? '' : 'away'].filter(Boolean).join(' · ')}</em></li>`)
+    .join('');
+  const songs = roomSongs();
+  const list = $('room-songs');
+  if (list.children.length !== songs.length) {
+    list.innerHTML = songs.map((s) => `<button type="button" class="song-tile" role="radio" data-id="${s.id}"><img src="${s.cover}" alt=""><span>${escapeHtml(s.title)}</span></button>`).join('');
+  }
+  for (const b of list.children) {
+    b.setAttribute('aria-checked', b.dataset.id === r.song);
+    b.disabled = !isHost;
+  }
+  const song = SONGS.find((s) => s.id === r.song);
+  if (song) setTheme(song);
+  for (const b of $('room-mode').querySelectorAll('button')) {
+    b.setAttribute('aria-checked', b.dataset.v === r.mode);
+    b.disabled = !isHost;
+  }
+  const here = members.filter((m) => m.here);
+  $('room-mode-note').textContent = r.mode === 'turns'
+    ? `Each singer takes ${LINES_PER_TURN} lines, in the order on the list, then the next one is up.`
+    : 'Everyone sings every line. Highest score wins.';
+  const host = members.find((m) => m.id === r.host);
+  $('btn-room-start').hidden = !isHost;
+  $('room-status').textContent = room.error ? `Connection trouble: ${room.error.message}`
+    : isHost ? (here.length < 2 ? 'Send the link to your friends. You can also start alone.' : `${here.length} singers ready.`)
+    : `Waiting for ${host?.name || 'the host'} to start the song.`;
+}
+
+async function connectRoomMic() {
+  roomMonitor?.disconnect();
+  roomMonitor = null;
+  try {
+    await ensureEngine();
+    roomMonitor = new VoiceInput(engine, { stream: await getStream(0) });
+    await roomMonitor.connect();
+  } catch (err) {
+    micError(err);
+    return;
+  }
+  let mics = [];
+  try { mics = await listMics(); } catch {}
+  const sel = $('room-mic');
+  sel.innerHTML = '<option value="">Default microphone</option>' +
+    mics.filter((m) => m.deviceId && m.deviceId !== 'default').map((m, k) => `<option value="${m.deviceId}">${m.label || `Microphone ${k + 1}`}</option>`).join('');
+  sel.value = mics.some((m) => m.deviceId === settings.players[0].deviceId) ? settings.players[0].deviceId : '';
+  const m = roomMonitor;
+  const tick = () => {
+    if (m !== roomMonitor || document.body.dataset.screen !== 'room') return;
+    m.drain();
+    $('room-level').style.width = `${Math.round(m.level * 100)}%`;
+    const last = m.history[m.history.length - 1];
+    $('room-note').textContent = last?.midi != null ? midiName(last.midi) : '–';
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+$('btn-friends').addEventListener('click', () => enterRoom(roomInLink() || null));
+$('btn-room-home').addEventListener('click', leaveRoom);
+$('btn-back-room').addEventListener('click', showRoom);
+$('btn-invite').addEventListener('click', async () => {
+  if (!room?.view) return;
+  const link = inviteLink(room.view.room.code);
+  let copied = false;
+  try { await navigator.clipboard.writeText(link); copied = true; } catch {}
+  const btn = $('btn-invite');
+  $('invite-label').textContent = copied ? 'Link copied! Send it to your friends' : link;
+  btn.classList.toggle('done', copied);
+  clearTimeout(btn.timer);
+  btn.timer = setTimeout(() => { $('invite-label').textContent = 'Copy invite link'; btn.classList.remove('done'); }, 2500);
+});
+$('room-name').addEventListener('input', (e) => {
+  settings.players[0].name = e.target.value.trim() || 'Singer';
+  saveSettings();
+  room?.send({ name: settings.players[0].name });
+});
+$('room-mic').addEventListener('change', (e) => {
+  settings.players[0].deviceId = e.target.value;
+  saveSettings();
+  connectRoomMic();
+});
+$('room-songs').addEventListener('click', (e) => {
+  const id = e.target.closest('.song-tile')?.dataset.id;
+  if (id && room?.view?.isHost) room.host('set', { song: id }).catch((err) => toast(err.message));
+});
+$('room-mode').addEventListener('click', (e) => {
+  const v = e.target.closest('button')?.dataset.v;
+  if (v && room?.view?.isHost) room.host('set', { mode: v }).catch((err) => toast(err.message));
+});
+$('btn-room-start').addEventListener('click', () => room?.host('start', {}).catch((err) => toast(err.message)));
 
 // ---------- Add your own song ----------
 const STEPS = [
@@ -997,6 +1223,12 @@ document.addEventListener('keydown', (e) => {
 show('title');
 setStage('img/stage-title.jpg');
 setTheme(SONGS[selIndex]);
+// Test hook: ?singer=<audio url> makes room games sing that recording instead of the mic.
+const roomSinger = params.get('singer') || undefined;
+if (roomInLink()) {
+  $('btn-start').hidden = true;
+  $('btn-friends').querySelector('span').textContent = 'Join the room';
+}
 window.__gv.songs = () => loadUserSongs().then(() => SONGS.map((s) => ({ id: s.id, title: s.title, user: !!s.user })));
 
 // Automation and test hook: ?autoplay=<song id>&input=demo|mic|<audio url>&lyrics=1&difficulty=normal&players=Ann,Ben

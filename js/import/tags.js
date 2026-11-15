@@ -4,7 +4,7 @@ const text = (bytes) => {
   const enc = bytes[0];
   const body = bytes.subarray(1);
   const label = enc === 1 || enc === 2 ? (enc === 1 ? 'utf-16' : 'utf-16be') : enc === 3 ? 'utf-8' : 'latin1';
-  return new TextDecoder(label).decode(body).replace(/\0+$/g, '').replace(/^﻿/, '').trim();
+  return new TextDecoder(label).decode(body).replace(/\0+$/g, '').replace(/^\uFEFF/, '').trim();
 };
 
 export async function readTags(file) {
