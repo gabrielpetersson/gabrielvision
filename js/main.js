@@ -496,6 +496,8 @@ function nearestNote(perf, t) {
   let best = null, dist = 1.2;
   for (let i = Math.max(0, perf.cursor - 2); i < Math.min(perf.notes.length, perf.cursor + 3); i++) {
     const n = perf.notes[i];
+    // Someone else's line in take-turns scores nothing, so the comet must not look like it's on it.
+    if (n.skip) continue;
     const d = t < n.t ? n.t - t : t > n.t + n.d ? t - n.t - n.d : 0;
     if (d < dist) { dist = d; best = n; }
   }
@@ -1051,39 +1053,34 @@ function onRoomUpdate(view) {
 
 function renderRoom() {
   const view = room?.view;
-  $('room-code').textContent = view ? inviteLink(view.room.code).replace(/^https?:\/\//, '') : '';
   if (!view) return;
   const { members, me, isHost } = view;
   const r = view.room;
-  const people = members
-    .map((m) => `<li class="${m.here ? '' : 'away'}" style="--c:${PLAYER_COLORS[m.color]}"><span class="dot"></span><span>${escapeHtml(m.name)}</span>${[m.id === me ? 'you' : '', m.id === r.host ? 'host' : '', m.here ? '' : 'left'].filter(Boolean).map((t) => `<em class="${t}">${t}</em>`).join('')}</li>`)
+  const mine = members.find((m) => m.id === me);
+  if (mine) $('room-me').style.setProperty('--c', PLAYER_COLORS[mine.color]);
+  const people = members.filter((m) => m.id !== me)
+    .map((m) => `<li class="person${m.here ? '' : ' away'}" style="--c:${PLAYER_COLORS[m.color]}"><span class="dot"></span><span>${escapeHtml(m.name)}</span></li>`)
     .join('');
   // Rebuilt only when it changes, so each name's entrance plays once.
   if ($('room-people').dataset.html !== people) $('room-people').innerHTML = $('room-people').dataset.html = people;
   const list = $('room-songs');
   const tiles = roomCatalog(view);
-  const key = tiles.map((t) => `${t.id}:${haveSong(t.id)}:${(t.holders || []).map((m) => m.id).join('+')}`).join('|');
+  const key = tiles.map((t) => `${t.id}:${haveSong(t.id)}`).join('|');
   if (list.dataset.key !== key) {
     list.dataset.key = key;
-    list.innerHTML = tiles.map((t) => {
-      const label = t.builtIn ? '' : haveSong(t.id) ? 'You have it' : t.holders.length ? `From ${t.holders[0].name}${t.holders.length > 1 ? ` +${t.holders.length - 1}` : ''}` : '';
+    list.innerHTML = '<button type="button" class="song-tile upload" id="room-upload"><span class="tile-art">+</span><span>Upload song</span></button>' + tiles.map((t) => {
       const art = haveSong(t.id) ? `<img src="${SONGS.find((x) => x.id === t.id).cover}" alt="">`
-        : `<span class="tile-art" style="--a:${t.accents[0]};--b:${t.accents[1]}">${escapeHtml(t.title)}</span>`;
-      return `<button type="button" class="song-tile" role="radio" data-id="${escapeHtml(t.id)}">${art}<span>${escapeHtml(t.title)}</span>${label ? `<em>${escapeHtml(label)}</em>` : ''}</button>`;
+        : `<span class="tile-art" style="--a:${t.accents[0]};--b:${t.accents[1]}">♪</span>`;
+      return `<button type="button" class="song-tile" role="radio" data-id="${escapeHtml(t.id)}">${art}<span>${escapeHtml(t.title)}</span></button>`;
     }).join('');
   }
-  for (const b of list.children) b.setAttribute('aria-checked', b.dataset.id === r.song);
+  for (const b of list.querySelectorAll('[data-id]')) b.setAttribute('aria-checked', b.dataset.id === r.song);
   const song = SONGS.find((s) => s.id === r.song);
   if (song) setTheme(song);
   for (const b of $('room-mode').querySelectorAll('button')) {
     b.setAttribute('aria-checked', b.dataset.v === r.mode);
     b.disabled = !isHost;
   }
-  const hostName = members.find((m) => m.id === r.host)?.name || 'The host';
-  $('room-mode-note').textContent = (r.mode === 'turns'
-    ? `Each singer takes ${LINES_PER_TURN} lines, in the order of the list in step 2.`
-    : 'Everyone sings every line. Highest score wins.') + (isHost ? '' : ` Anyone can pick the song; ${hostName} presses Start.`);
-  $('btn-room-start').hidden = !isHost;
   renderRoomStatus();
 }
 
@@ -1093,7 +1090,6 @@ function renderRoomStatus() {
   if (!view) return;
   const { members, isHost } = view;
   const r = view.room;
-  const here = members.filter((m) => m.here);
   const title = roomCatalog(view).find((t) => t.id === r.song)?.title || 'the song';
   const { holders, missing } = songHolders(view, r.song);
   const mine = transfers.get(r.song);
@@ -1109,10 +1105,10 @@ function renderRoomStatus() {
   else if (missing.length) {
     const getting = missing.find((m) => m.live?.xfer?.id === r.song);
     status = `Waiting for ${missing.map((m) => m.name).join(', ')} to get “${title}”${getting ? ` (${pct(getting.live.xfer.p)})` : ''}.`;
-  } else if (isHost) status = here.length < 2 ? 'Send the link to your friends. You can also start alone.' : `${here.length} singers ready.`;
-  else status = `Waiting for ${members.find((m) => m.id === r.host)?.name || 'the host'} to start the song.`;
+  } else status = '';
   $('room-status').textContent = status;
-  $('btn-room-start').disabled = missing.length > 0;
+  $('btn-room-start').disabled = !isHost || missing.length > 0;
+  $('btn-room-start').textContent = isHost ? 'Start' : `Waiting for ${members.find((m) => m.id === r.host)?.name || 'the host'}`;
 }
 
 async function connectRoomMic() {
@@ -1126,19 +1122,11 @@ async function connectRoomMic() {
     micError(err);
     return;
   }
-  let mics = [];
-  try { mics = await listMics(); } catch {}
-  const sel = $('room-mic');
-  sel.innerHTML = '<option value="">Default microphone</option>' +
-    mics.filter((m) => m.deviceId && m.deviceId !== 'default').map((m, k) => `<option value="${m.deviceId}">${m.label || `Microphone ${k + 1}`}</option>`).join('');
-  sel.value = mics.some((m) => m.deviceId === settings.players[0].deviceId) ? settings.players[0].deviceId : '';
   const m = roomMonitor;
   const tick = () => {
     if (m !== roomMonitor || document.body.dataset.screen !== 'room') return;
     m.drain();
-    $('room-level').style.width = `${Math.round(m.level * 100)}%`;
-    const last = m.history[m.history.length - 1];
-    $('room-note').textContent = last?.midi != null ? midiName(last.midi) : '–';
+    $('room-level').style.transform = `scale(${1 + Math.min(1, m.level * 2) * 0.8})`;
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -1153,7 +1141,7 @@ $('btn-invite').addEventListener('click', async () => {
   let copied = false;
   try { await navigator.clipboard.writeText(link); copied = true; } catch {}
   const btn = $('btn-invite');
-  $('invite-label').textContent = copied ? 'Link copied! Send it to your friends' : link;
+  $('invite-label').textContent = copied ? 'Copied!' : link;
   btn.classList.toggle('done', copied);
   clearTimeout(btn.timer);
   btn.timer = setTimeout(() => { $('invite-label').textContent = 'Copy invite link'; btn.classList.remove('done'); }, 2500);
@@ -1163,18 +1151,19 @@ $('room-name').addEventListener('input', (e) => {
   saveSettings();
   room?.send({ name: settings.players[0].name });
 });
-$('room-mic').addEventListener('change', (e) => {
-  settings.players[0].deviceId = e.target.value;
-  saveSettings();
-  connectRoomMic();
-});
 $('room-songs').addEventListener('click', (e) => {
+  if (e.target.closest('#room-upload')) return $('room-file').click();
   const id = e.target.closest('.song-tile')?.dataset.id;
   if (id && room?.view) room.act('set', { song: id }).catch((err) => toast(err.message));
 });
 $('room-mode').addEventListener('click', (e) => {
   const v = e.target.closest('button')?.dataset.v;
   if (v && room?.view?.isHost) room.act('set', { mode: v }).catch((err) => toast(err.message));
+});
+$('room-file').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (file) importNow(file);
 });
 $('btn-room-start').addEventListener('click', () => room?.act('start', {}).catch((err) => toast(err.message)));
 
@@ -1219,20 +1208,36 @@ function setImportFile(file) {
   $('import-go').disabled = !file;
 }
 
+// From the room: no options to fill in, the file goes straight through.
+function importNow(file) {
+  if (importAbort) return;
+  openImport(file);
+  runImport();
+}
+
 function closeImport() {
   importAbort?.abort();
   $('import').hidden = true;
 }
 
+// Updated in place: rebuilding the list on every progress tick restarted the spinner and made the bar jump.
 function renderSteps(current, progress, note) {
+  const list = $('import-steps');
+  if (list.children.length !== STEPS.length) {
+    list.innerHTML = STEPS.map((s) => `<li><span class="ico"></span><span>${s.label}</span><span class="pct"></span><span class="sub" hidden></span><span class="bar" hidden><i></i></span></li>`).join('');
+  }
   const at = STEPS.findIndex((s) => s.key === current);
-  $('import-steps').innerHTML = STEPS.map((s, i) => {
-    const state = i < at ? 'done' : i === at ? 'on' : '';
+  STEPS.forEach((s, i) => {
+    const li = list.children[i];
     const pct = i === at && progress != null ? Math.round(progress * 100) : null;
-    return `<li class="${state}"><span class="ico"></span><span>${s.label}</span><span class="pct">${pct != null ? `${pct}%` : ''}</span>
-      ${i === at && note ? `<span class="sub">${escapeHtml(note)}</span>` : ''}
-      ${i === at && pct != null ? `<span class="bar"><i style="width:${pct}%"></i></span>` : ''}</li>`;
-  }).join('');
+    li.className = i < at ? 'done' : i === at ? 'on' : '';
+    li.querySelector('.pct').textContent = pct != null ? `${pct}%` : '';
+    const sub = li.querySelector('.sub');
+    sub.textContent = i === at && note ? note : '';
+    sub.hidden = !sub.textContent;
+    li.querySelector('.bar').hidden = pct == null;
+    li.querySelector('.bar i').style.width = `${pct ?? 0}%`;
+  });
 }
 
 async function runImport() {
@@ -1267,7 +1272,10 @@ async function runImport() {
     $('import').hidden = true;
     $('import-lyrics').value = '';
     const secs = Math.round((performance.now() - t0) / 1000);
-    toast(`“${rec.title}” is ready: ${rec.chart.lines.length} lines found in ${secs} s. Press Sing.`, 'ok');
+    if (document.body.dataset.screen === 'room') {
+      renderRoom();
+      room?.act('set', { song: song.id }).catch((err) => toast(err.message));
+    } else toast(`“${rec.title}” is ready: ${rec.chart.lines.length} lines found in ${secs} s. Press Sing.`, 'ok');
     window.__gv.imported = { id: rec.id, lines: rec.chart.lines.length, secs, where: rec.where, language: rec.chart.language };
   } catch (err) {
     if (err?.name === 'AbortError') return;
@@ -1292,17 +1300,20 @@ $('import-file').addEventListener('change', (e) => e.target.files[0] && setImpor
 $('import-go').addEventListener('click', runImport);
 for (const ev of ['dragenter', 'dragover']) {
   document.addEventListener(ev, (e) => {
-    if (document.body.dataset.screen !== 'select' || !e.dataTransfer?.types.includes('Files')) return;
+    const screen = document.body.dataset.screen;
+    if (!['select', 'room'].includes(screen) || !e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
-    $('drop').classList.add('over');
+    $(screen === 'room' ? 'room-screen' : 'drop').classList.add('over');
   });
 }
-document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) $('drop').classList.remove('over'); });
+document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) for (const id of ['drop', 'room-screen']) $(id).classList.remove('over'); });
 document.addEventListener('drop', (e) => {
-  if (document.body.dataset.screen !== 'select') return;
+  const screen = document.body.dataset.screen;
+  if (!['select', 'room'].includes(screen)) return;
   e.preventDefault();
-  $('drop').classList.remove('over');
+  for (const id of ['drop', 'room-screen']) $(id).classList.remove('over');
   const file = e.dataTransfer.files[0];
+  if (screen === 'room') return file && importNow(file);
   if (!file || importAbort) return;
   if ($('import').hidden) openImport(file);
   else setImportFile(file);

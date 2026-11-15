@@ -1,11 +1,12 @@
 // YIN pitch detector (de Cheveigné & Kawahara, 2002) on a 16 kHz-ish mono window.
 // Shared by the AudioWorklet (live mic) and by offline tests, so both paths score identically.
 
-export const MIN_HZ = 60;
+// Below 70 Hz is bass guitar and room rumble, not a singing voice.
+export const MIN_HZ = 70;
 export const MAX_HZ = 1100;
 
 export class Yin {
-  constructor(sampleRate, size = 1024, threshold = 0.15) {
+  constructor(sampleRate, size = 1024, threshold = 0.2) {
     this.sampleRate = sampleRate;
     this.size = size;
     this.threshold = threshold;
@@ -44,10 +45,20 @@ export class Yin {
       }
     }
     if (tau < 0) {
-      // No dip under the threshold: take the global minimum but report low clarity.
+      // No dip under the threshold: take the first dip about as deep as the deepest one. The deepest is often a
+      // multiple of the true period (an octave low), especially when the song leaks into the mic.
       let best = minTau;
       for (let t = minTau + 1; t <= maxTau; t++) if (d[t] < d[best]) best = t;
       tau = best;
+      for (let t = minTau + 1; t < maxTau; t++) if (d[t] <= d[t - 1] && d[t] <= d[t + 1] && d[t] <= d[best] + 0.05) { tau = t; break; }
+    }
+    // A dip at half or a third of the period nearly as deep as this one means this one is a subharmonic.
+    for (const k of [2, 3]) {
+      const h = Math.round(tau / k);
+      if (h <= minTau + 2) continue;
+      let m = h;
+      for (let t = h - 2; t <= h + 2; t++) if (d[t] < d[m]) m = t;
+      if (d[m] < d[tau] + 0.04) { tau = m; break; }
     }
     const clarity = 1 - d[tau];
     let better = tau;

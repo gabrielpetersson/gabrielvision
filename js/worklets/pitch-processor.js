@@ -6,11 +6,11 @@ const SIZE = 1024;
 const HOP = 256;
 const PCM_CHUNK = 4096;
 
-// RBJ low-pass biquad, used twice in series as the decimation filter.
+// RBJ low/high-pass biquad. Two low-passes in series are the decimation filter; two high-passes remove bass.
 class Biquad {
-  constructor(sr, fc, q) {
+  constructor(sr, fc, q, highpass = false) {
     const w = (2 * Math.PI * fc) / sr, c = Math.cos(w), a = Math.sin(w) / (2 * q), n = 1 + a;
-    this.b0 = (1 - c) / 2 / n; this.b1 = (1 - c) / n; this.b2 = this.b0;
+    this.b0 = (highpass ? 1 + c : 1 - c) / 2 / n; this.b1 = (highpass ? -(1 + c) : 1 - c) / n; this.b2 = this.b0;
     this.a1 = (-2 * c) / n; this.a2 = (1 - a) / n;
     this.x1 = this.x2 = this.y1 = this.y2 = 0;
   }
@@ -28,6 +28,8 @@ class PitchProcessor extends AudioWorkletProcessor {
     this.rate = sampleRate / this.factor;
     const fc = this.rate * 0.42;
     this.lp = [new Biquad(sampleRate, fc, 0.541), new Biquad(sampleRate, fc, 1.307)];
+    // High-pass at 80 Hz after decimation: keeps the voice, drops bass and rumble that pull YIN an octave low.
+    this.hp = [new Biquad(this.rate, 80, 0.541, true), new Biquad(this.rate, 80, 1.307, true)];
     this.yin = new Yin(this.rate, SIZE);
     this.ring = new Float32Array(SIZE);
     this.win = new Float32Array(SIZE);
@@ -54,7 +56,7 @@ class PitchProcessor extends AudioWorkletProcessor {
       if (++this.phase < this.factor) continue;
       this.phase = 0;
       const absTime = (currentFrame + i) / sampleRate;
-      this.ring[this.w] = y;
+      this.ring[this.w] = this.hp[1].run(this.hp[0].run(y));
       this.w = (this.w + 1) % SIZE;
       if (this.filled < SIZE) this.filled++;
       if (this.pcmOn) {

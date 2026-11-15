@@ -2,7 +2,9 @@
 // feeding the pitch worklet. Produces song-time pitch frames for scoring and the comet trail.
 import { hzToMidi } from './pitch.js';
 
-const CLARITY_MIN = 0.72;
+const CLARITY_MIN = 0.65;
+// The same note an octave away has to hold this many frames (~130 ms) before the voice is believed to have jumped.
+const OCTAVE_HOLD = 8;
 const PCM_KEEP_SECONDS = 40;
 
 export async function listMics() {
@@ -34,6 +36,8 @@ export class VoiceInput {
     this.level = 0;
     this.lastMidi = null;
     this.recent = [];
+    this.stable = null;
+    this.octave = { dir: 0, n: 0 };
     this.floorDb = -70;
     this.pcm = [];
     this.pcmOn = false;
@@ -92,6 +96,7 @@ export class VoiceInput {
       this.level = Math.max(0, Math.min(1, (db + 60) / 50));
       const loud = db > Math.max(-58, this.floorDb + 9);
       let midi = hz > 0 && clarity >= CLARITY_MIN && loud ? hzToMidi(hz) : null;
+      midi = this.holdOctave(midi);
       // Median of three removes single-frame octave slips.
       this.recent.push(midi);
       if (this.recent.length > 3) this.recent.shift();
@@ -106,6 +111,25 @@ export class VoiceInput {
     }
     const cut = this.history.length - 400;
     if (cut > 0) this.history.splice(0, cut);
+  }
+
+  // Octave slips are short; real octave leaps last. Fold a reading onto the current note's octave until the new
+  // octave has held for OCTAVE_HOLD frames.
+  holdOctave(midi) {
+    if (midi == null) {
+      if (this.recent.every((m) => m == null)) this.stable = null;
+      return null;
+    }
+    if (this.stable != null) {
+      const dir = Math.round((midi - this.stable) / 12);
+      if (dir !== 0 && Math.abs(midi - this.stable - 12 * dir) < 1.5) {
+        this.octave = this.octave.dir === dir ? { dir, n: this.octave.n + 1 } : { dir, n: 1 };
+        if (this.octave.n < OCTAVE_HOLD) midi -= 12 * dir;
+        else this.octave = { dir: 0, n: 0 };
+      } else this.octave = { dir: 0, n: 0 };
+    }
+    this.stable = this.stable == null || Math.abs(midi - this.stable) > 3 ? midi : this.stable * 0.7 + midi * 0.3;
+    return midi;
   }
 
   drain() {
@@ -139,6 +163,8 @@ export class VoiceInput {
     this.frames = [];
     this.history = [];
     this.recent = [];
+    this.stable = null;
+    this.octave = { dir: 0, n: 0 };
     this.pcm = [];
   }
 
