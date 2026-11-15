@@ -44,7 +44,7 @@
   </section>
 
   <!-- Song select + setup -->
-  <section class="screen" id="select-screen" hidden>
+  <section class="screen vinyl" id="select-screen" hidden>
     <header class="topbar">
       <button class="icon-btn" id="btn-home" type="button" aria-label="Back to title">
         <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
@@ -100,42 +100,49 @@
     </div>
   </section>
 
-  <!-- Room: sing with friends, each on their own device -->
-  <section class="screen" id="room-screen" hidden>
+  <!-- Room: sing with friends, each on their own device. Three steps, left to right. -->
+  <section class="screen vinyl" id="room-screen" hidden>
     <header class="topbar">
       <button class="icon-btn" id="btn-room-home" type="button" aria-label="Leave the room">
         <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
       </button>
       <div class="mini-logo">Gabriel <b>Singing Contest</b></div>
     </header>
-    <div class="room-grid">
-      <div class="room-main">
+    <div class="room-head">
+      <h2>Your room</h2>
+      <p>Everyone sings on their own phone or computer. When the song starts, it starts for everyone at the same moment.</p>
+    </div>
+    <div class="room-steps">
+      <section class="card step">
+        <h3><i>1</i>Invite friends</h3>
+        <p class="step-note">Anyone who opens this link joins your room.</p>
         <button class="btn-invite" id="btn-invite" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" /><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /></svg>
           <span id="invite-label">Copy invite link</span>
         </button>
-        <p class="room-code" id="room-code"></p>
-        <div class="people glass">
-          <h3>Who's here</h3>
-          <ul id="room-people"></ul>
-          <label class="name-field"><span class="field-label">Your name</span><input type="text" id="room-name" maxlength="18" autocomplete="nickname"></label>
-        </div>
-      </div>
-      <aside class="setup glass room-setup">
-        <h3>Song</h3>
-        <div class="song-list" id="room-songs"></div>
-        <div class="seg" id="room-mode" role="radiogroup" aria-label="How you sing">
-          <button type="button" data-v="together">All at once</button><button type="button" data-v="turns">Take turns</button>
-        </div>
-        <p class="field-note" id="room-mode-note"></p>
-        <div class="player-row" id="room-mic-row" style="--c: var(--p1)">
-          <span class="dot"></span>
+        <p class="invite-url" id="room-code"></p>
+      </section>
+      <section class="card step">
+        <h3><i>2</i>Who's singing</h3>
+        <ul id="room-people"></ul>
+        <label class="name-field"><span class="field-label">Your name</span><input type="text" id="room-name" maxlength="18" autocomplete="nickname"></label>
+        <div class="mic-check" style="--c: var(--vink)">
+          <span class="field-label">Your mic</span>
           <select id="room-mic" aria-label="Your microphone"><option value="">Default microphone</option></select>
           <div class="meter"><span class="bar"><i id="room-level"></i></span><span class="note" id="room-note">–</span></div>
+          <p class="step-note">Sing a note. The bar should move.</p>
         </div>
-        <button class="btn-primary" id="btn-room-start" type="button">Start</button>
-        <p class="field-note room-status" id="room-status"></p>
-      </aside>
+      </section>
+      <section class="card step">
+        <h3><i>3</i>Pick a song</h3>
+        <div class="song-list" id="room-songs" role="radiogroup" aria-label="Songs"></div>
+        <div class="seg" id="room-mode" role="radiogroup" aria-label="How you sing">
+          <button type="button" data-v="together">Everyone at once</button><button type="button" data-v="turns">Take turns</button>
+        </div>
+        <p class="step-note" id="room-mode-note"></p>
+        <button class="btn-primary" id="btn-room-start" type="button">Start the song</button>
+        <p class="room-status" id="room-status"></p>
+      </section>
     </div>
   </section>
 
@@ -176,7 +183,7 @@
   </div>
 
   <!-- Results -->
-  <section class="screen" id="results-screen" hidden>
+  <section class="screen vinyl" id="results-screen" hidden>
     <div class="results-grid">
       <div class="board">
         <p class="kicker" id="res-kicker">Results</p>
@@ -194,7 +201,7 @@
   </section>
 
   <!-- Add your own song -->
-  <div class="overlay" id="import" hidden>
+  <div class="overlay vinyl" id="import" hidden>
     <div class="import-card glass" role="dialog" aria-modal="true" aria-labelledby="import-title">
       <div class="import-head">
         <h3 id="import-title">Add your own song</h3>

@@ -1048,12 +1048,12 @@ function onRoomUpdate(view) {
 
 function renderRoom() {
   const view = room?.view;
-  $('room-code').innerHTML = view ? `Room <b>${view.room.code}</b>` : '';
+  $('room-code').textContent = view ? inviteLink(view.room.code).replace(/^https?:\/\//, '') : '';
   if (!view) return;
   const { members, me, isHost } = view;
   const r = view.room;
   const people = members
-    .map((m) => `<li class="${m.here ? '' : 'away'}" style="--c:${PLAYER_COLORS[m.color]}"><span class="dot"></span><span>${escapeHtml(m.name)}</span><em>${[m.id === r.host ? 'host' : '', m.id === me ? 'you' : '', m.here ? '' : 'away'].filter(Boolean).join(' · ')}</em></li>`)
+    .map((m) => `<li class="${m.here ? '' : 'away'}" style="--c:${PLAYER_COLORS[m.color]}"><span class="dot"></span><span>${escapeHtml(m.name)}</span>${[m.id === me ? 'you' : '', m.id === r.host ? 'host' : '', m.here ? '' : 'left'].filter(Boolean).map((t) => `<em class="${t}">${t}</em>`).join('')}</li>`)
     .join('');
   // Rebuilt only when it changes, so each name's entrance plays once.
   if ($('room-people').dataset.html !== people) $('room-people').innerHTML = $('room-people').dataset.html = people;
@@ -1076,9 +1076,10 @@ function renderRoom() {
     b.setAttribute('aria-checked', b.dataset.v === r.mode);
     b.disabled = !isHost;
   }
-  $('room-mode-note').textContent = r.mode === 'turns'
-    ? `Each singer takes ${LINES_PER_TURN} lines, in the order on the list, then the next one is up.`
-    : 'Everyone sings every line. Highest score wins.';
+  const hostName = members.find((m) => m.id === r.host)?.name || 'The host';
+  $('room-mode-note').textContent = (r.mode === 'turns'
+    ? `Each singer takes ${LINES_PER_TURN} lines, in the order of the list in step 2.`
+    : 'Everyone sings every line. Highest score wins.') + (isHost ? '' : ` Anyone can pick the song; ${hostName} presses Start.`);
   $('btn-room-start').hidden = !isHost;
   renderRoomStatus();
 }
