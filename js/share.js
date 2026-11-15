@@ -47,7 +47,7 @@ export async function packSong(rec, onProgress) {
 
 // A received song is someone else's file and its details end up in this page, so it is checked before it is kept:
 // the id must be the one asked for, the colours real colours, and the parts MP3s and pictures.
-const PART_TYPES = { inst: /^audio\/mpeg$/, vocals: /^audio\/mpeg$/, cover: /^image\/(png|jpe?g|webp|gif)$/, stage: /^image\/(png|jpe?g|webp|gif)$/ };
+const PART_TYPES = { inst: /^audio\/mpeg$/, vocals: /^audio\/mpeg$/, cover: /^image\/(png|jpe?g|webp|gif)$/i, stage: /^image\/(png|jpe?g|webp|gif)$/i };
 const COLOUR = /^#[0-9a-f]{6}$/i;
 
 // from: who sent it, kept so the library can say where a song came from. id: the song asked for.
