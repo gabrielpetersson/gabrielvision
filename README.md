@@ -12,6 +12,8 @@ such as Chrome or Edge on a laptop). Paste the lyrics for exact lines. Uploaded 
 
 **Sing with friends.** Press "Sing with friends", copy the invite link and send it. Everyone sings on their own
 device, the song starts at the same moment for all, and scores show live. Pick "Take turns" for two lines each.
+Songs anyone uploaded show up for the whole room: pick one and it is sent to everyone who doesn't have it yet,
+and stays in their library afterwards.
 
 **Take turns on one device.** Under "Sing alone", pass one mic around: each singer gets two lines, then the next one is up (up to six singers).
 Or sing together, two singers on two mics.

@@ -1,7 +1,9 @@
 // Client for the room service (rooms/worker.js): make or join a room, then poll it about once a second.
-// Each poll says "I'm here" (plus my name, live score or final result) and brings back the room.
+// Each poll says "I'm here" (plus my name, library, live state or final result) and brings back the room.
+// Songs pass between friends through /api/song: one person who has the song uploads it, the others fetch it.
 
-const API = location.hostname === 'localhost' ? 'http://localhost:8787/api/room' : 'https://gabrielvision-rooms.deadblock.workers.dev/api/room';
+const BASE = location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://gabrielvision-rooms.deadblock.workers.dev';
+const API = `${BASE}/api/room`;
 const POLL_MS = 1000;
 const SEAT = (code) => `gv:seat:${code}`;
 
@@ -22,6 +24,8 @@ export class Room {
     this.view = null;
     this.offset = 0; // server clock minus this clock, in ms
     this.pending = {};
+    // What others see of me besides my name: live score in a song, songs I have sent, a transfer in progress.
+    this.live = {};
   }
 
   // Joins the room in the link, or makes a new one. A seat kept from earlier in this tab is reused.
@@ -51,9 +55,53 @@ export class Room {
     return Date.now() + this.offset;
   }
 
-  // Extra fields ride on the next poll (name, live score, result); host actions go out at once.
+  // Extra fields ride on the next poll (name, library, result); room actions go out at once.
   send(fields) {
     Object.assign(this.pending, fields);
+  }
+
+  // Live state is sent whole; this merges a change into it.
+  setLive(fields) {
+    Object.assign(this.live, fields);
+    this.pending.live = { ...this.live };
+  }
+
+  songUrl(song) {
+    return `${BASE}/api/song?${new URLSearchParams({ ...this.seat, song })}`;
+  }
+
+  upload(song, blob, onProgress) {
+    const xhr = new XMLHttpRequest();
+    return new Promise((resolve, reject) => {
+      xhr.open('POST', this.songUrl(song));
+      xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+      xhr.onload = () => (xhr.status < 300 ? resolve() : reject(new Error(JSON.parse(xhr.responseText || '{}').error || `Sending failed (${xhr.status})`)));
+      xhr.onerror = () => reject(new Error('Sending the song failed. Check the connection.'));
+      xhr.send(blob);
+    });
+  }
+
+  // A song sent a moment ago can take up to a minute to reach the server's other regions, so a miss is retried.
+  async download(song, size, onProgress) {
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(this.songUrl(song));
+      if (res.status === 404 && attempt < 40) {
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+      if (!res.ok) throw new Error(`Getting the song failed (${res.status}).`);
+      const reader = res.body.getReader();
+      const parts = [];
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+        got += value.length;
+        if (size) onProgress(Math.min(1, got / size));
+      }
+      return new Blob(parts);
+    }
   }
 
   async sync(extra) {
@@ -77,7 +125,8 @@ export class Room {
     this.onUpdate?.(this.view);
   }
 
-  async host(action, fields) {
+  // set (song, or the host's mode) and start (host only); the reply is the fresh room.
+  async act(action, fields) {
     const view = await call({ action, ...this.seat, ...fields });
     this.apply(view);
   }

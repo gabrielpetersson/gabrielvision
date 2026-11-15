@@ -42,6 +42,7 @@ export function userSong(rec) {
   return {
     id: rec.id,
     title: rec.title,
+    artist: rec.artist,
     style: LANGUAGES.of(rec.chart.language || 'en'),
     level: 'Your song',
     accent: rec.accents[0],

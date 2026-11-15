@@ -490,12 +490,23 @@ body[data-screen='results'] .bg-img { filter: blur(14px) brightness(0.45); }
   width: 100%; border-radius: 12px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.35); color: var(--text);
   padding: 12px 14px; font: 700 16px/1.2 var(--ui);
 }
-.song-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.song-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; max-height: 360px; overflow-y: auto; }
 .song-tile { border: 0; padding: 0; background: none; display: grid; gap: 6px; text-align: left; color: var(--muted); font: 600 12px/1.25 var(--ui); }
 .song-tile img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; display: block; opacity: 0.55; transition: opacity 0.2s, box-shadow 0.2s; }
 .song-tile[aria-checked='true'] { color: var(--text); }
 .song-tile[aria-checked='true'] img { opacity: 1; box-shadow: 0 0 0 2px #fff, 0 0 24px color-mix(in srgb, var(--accent) 60%, transparent); }
 .song-tile:disabled { cursor: default; }
+.song-tile em { font: 600 11px/1.2 var(--ui); font-style: normal; color: var(--faint); }
+.song-tile[aria-checked='true'] em { color: var(--gold); }
+/* A song someone else has: their cover arrives with the song, so its tile is the song's colours and title. */
+.song-tile .tile-art {
+  display: flex; align-items: flex-end; width: 100%; aspect-ratio: 1; border-radius: 12px; padding: 10px; opacity: 0.55;
+  background: radial-gradient(circle at 20% 15%, var(--a), transparent 70%), radial-gradient(circle at 90% 90%, var(--b), transparent 65%), #07080f;
+  font: 800 13px/1.15 var(--display); text-transform: uppercase; color: #fff; overflow: hidden; overflow-wrap: anywhere;
+  transition: opacity 0.2s, box-shadow 0.2s;
+}
+.song-tile[aria-checked='true'] .tile-art { opacity: 1; box-shadow: 0 0 0 2px #fff, 0 0 24px color-mix(in srgb, var(--accent) 60%, transparent); }
+#btn-room-start:disabled { opacity: 0.45; cursor: default; }
 .room-setup #room-mic-row select { grid-column: 2; }
 .room-status { text-align: center; margin: 0; }
 .hud .pcard.remote .mult { visibility: hidden; }

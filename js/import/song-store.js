@@ -24,5 +24,6 @@ async function tx(mode, fn) {
 }
 
 export const listUserSongs = () => tx('readonly', (s) => s.getAll()).then((all) => all.sort((a, b) => a.createdAt - b.createdAt));
+export const getUserSong = (id) => tx('readonly', (s) => s.get(id));
 export const saveUserSong = (song) => tx('readwrite', (s) => s.put(song));
 export const deleteUserSong = (id) => tx('readwrite', (s) => s.delete(id));

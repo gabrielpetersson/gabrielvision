@@ -5,7 +5,8 @@ import { StageRenderer } from './renderer.js';
 import { LyricChecker, lyricMatch } from './lyric-check.js';
 import { SONGS, loadChart, userSong, releaseSong } from './songs.js';
 import { midiName } from './pitch.js';
-import { listUserSongs, saveUserSong, deleteUserSong } from './import/song-store.js';
+import { listUserSongs, getUserSong, saveUserSong, deleteUserSong } from './import/song-store.js';
+import { packSong, unpackSong } from './share.js';
 import { SERVER } from './import/server.js';
 import { Room, inviteLink, roomInLink } from './room.js';
 
@@ -549,7 +550,7 @@ function tick() {
   if (game.inRoom && performance.now() - game.sentAt > 900) {
     game.sentAt = performance.now();
     const me = game.scored[0];
-    room?.send({ live: { round: game.round, score: me.perf.score, mult: me.perf.multiplier, combo: me.perf.combo } });
+    room?.setLive({ round: game.round, score: me.perf.score, mult: me.perf.multiplier, combo: me.perf.combo });
   }
   updateLyrics(now);
   updateHud(now);
@@ -894,13 +895,93 @@ $('btn-songs').addEventListener('click', () => enterSelect());
 const lastOpts = () => lastGameOpts || { mode: 'mic' };
 
 // ---------- Sing with friends: rooms ----------
-// Everyone opens the invite link on their own device. The host picks a song and starts; the song starts on every
+// Everyone opens the invite link on their own device. Anyone picks a song, the host starts; the song starts on every
 // device at the same moment, each person sings into their own mic, and scores travel through the room service.
+// Songs people uploaded are listed for the whole room; a picked one goes from someone who has it to everyone who
+// doesn't, and stays in their library afterwards.
 let room = null;
 let roomMonitor = null;
 let roomPlayed = 0;
-const roomSongs = () => SONGS.filter((s) => !s.user);
+const transfers = new Map(); // song id -> { dir: 'send' | 'get', error? } for transfers this device runs
 const myName = () => settings.players[0]?.name || 'Singer';
+const haveSong = (id) => SONGS.some((s) => s.id === id);
+const builtIn = (id) => SONGS.some((s) => s.id === id && !s.user);
+const myLibrary = () => SONGS.filter((s) => s.user).map((s) => ({ id: s.id, title: s.title, artist: s.artist, duration: s.chartData.duration, language: s.chartData.language, accents: [s.accent, s.accent2] }));
+const sendLibrary = () => room?.send({ library: myLibrary() });
+
+// Built-in songs, then every song someone here has, each with who has it.
+function roomCatalog(view) {
+  const lib = new Map();
+  for (const s of SONGS.filter((x) => x.user)) lib.set(s.id, { id: s.id, title: s.title, accents: [s.accent, s.accent2], cover: s.cover, holders: [] });
+  for (const m of view.members.filter((x) => x.here)) {
+    for (const e of m.library) {
+      if (!lib.has(e.id)) lib.set(e.id, { ...e, holders: [] });
+      lib.get(e.id).holders.push(m);
+    }
+  }
+  return [...SONGS.filter((x) => !x.user).map((s) => ({ id: s.id, title: s.title, cover: s.cover, builtIn: true })), ...lib.values()];
+}
+
+// Who in the room has the picked song, and who still needs it.
+function songHolders(view, id) {
+  const here = view.members.filter((m) => m.here);
+  const has = (m) => (m.id === view.me ? haveSong(id) : builtIn(id) || m.library.some((e) => e.id === id));
+  return { holders: here.filter(has), missing: here.filter((m) => !has(m)) };
+}
+
+// The first person here who has the picked song sends it once; everyone without it fetches it when it's sent.
+function runTransfers(view) {
+  const id = view.room.song;
+  if (builtIn(id) || transfers.has(id)) return;
+  const { holders, missing } = songHolders(view, id);
+  if (!missing.length || !holders.length) return;
+  if (haveSong(id)) {
+    if (holders[0].id === view.me && !room.live.sent?.[id]) sendSong(id);
+  } else {
+    const sender = holders.find((m) => m.live?.sent?.[id]);
+    if (sender) getSong(id, sender);
+  }
+}
+
+async function sendSong(id) {
+  const t = { dir: 'send' };
+  transfers.set(id, t);
+  const xfer = (p) => room?.setLive({ xfer: { id, dir: 'send', p: Math.round(p * 100) / 100 } });
+  try {
+    xfer(0);
+    const blob = await packSong(await getUserSong(id), (p) => xfer(p * 0.4));
+    await room.upload(id, blob, (p) => xfer(0.4 + p * 0.6));
+    room?.setLive({ sent: { ...room.live.sent, [id]: blob.size }, xfer: null });
+    transfers.delete(id);
+  } catch (err) {
+    t.error = err.message || String(err);
+    room?.setLive({ xfer: null });
+  }
+  renderRoom();
+}
+
+async function getSong(id, sender) {
+  const t = { dir: 'get', from: sender.name };
+  transfers.set(id, t);
+  const xfer = (p) => {
+    t.p = p;
+    room?.setLive({ xfer: { id, dir: 'get', p: Math.round(p * 100) / 100 } });
+    if (document.body.dataset.screen === 'room') renderRoomStatus();
+  };
+  try {
+    xfer(0);
+    const rec = await unpackSong(await room.download(id, sender.live.sent[id], xfer), sender.name);
+    await saveUserSong(rec);
+    SONGS.push(userSong(rec));
+    sendLibrary();
+    room?.setLive({ xfer: null });
+    transfers.delete(id);
+  } catch (err) {
+    t.error = err.message || String(err);
+    room?.setLive({ xfer: null });
+  }
+  renderRoom();
+}
 
 async function enterRoom(code) {
   await ensureEngine();
@@ -910,7 +991,9 @@ async function enterRoom(code) {
   showRoom();
   $('room-status').textContent = code ? 'Joining…' : 'Making your room…';
   try {
+    await loadUserSongs();
     const joined = await room.enter(code, myName());
+    sendLibrary();
     history.replaceState(null, '', `#room=${joined}`);
     window.__gv.room = joined;
     // Don't drop into a song that has been playing for a while; wait for the next one.
@@ -946,6 +1029,8 @@ function onRoomUpdate(view) {
   // The host started a new song: play it (also from the results of the last one).
   if (r.round > roomPlayed && r.startAt && room.serverNow() - r.startAt < 15000 && !(game && !game.ended)) {
     roomPlayed = r.round;
+    // Someone who arrived without the song sits this one out and gets it for the next.
+    if (!haveSong(r.song)) return renderRoom();
     roomMonitor?.disconnect();
     roomMonitor = null;
     const members = r.roster.map((id) => view.members.find((m) => m.id === id)).filter(Boolean);
@@ -956,6 +1041,7 @@ function onRoomUpdate(view) {
     for (const p of game.players) if (!p.perf) p.remote = view.members.find((m) => m.id === p.member)?.live?.round === game.round ? view.members.find((m) => m.id === p.member).live : p.remote;
   }
   if (document.body.dataset.screen === 'results' && lastResults?.g.inRoom) renderRanking(lastResults.g, lastResults.results);
+  if (!(game && !game.ended)) runTransfers(view);
   if (document.body.dataset.screen === 'room') renderRoom();
 }
 
@@ -965,33 +1051,63 @@ function renderRoom() {
   if (!view) return;
   const { members, me, isHost } = view;
   const r = view.room;
-  $('room-people').innerHTML = members
+  const people = members
     .map((m) => `<li class="${m.here ? '' : 'away'}" style="--c:${PLAYER_COLORS[m.color]}"><span class="dot"></span><span>${escapeHtml(m.name)}</span><em>${[m.id === r.host ? 'host' : '', m.id === me ? 'you' : '', m.here ? '' : 'away'].filter(Boolean).join(' · ')}</em></li>`)
     .join('');
-  const songs = roomSongs();
+  // Rebuilt only when it changes, so each name's entrance plays once.
+  if ($('room-people').dataset.html !== people) $('room-people').innerHTML = $('room-people').dataset.html = people;
   const list = $('room-songs');
-  if (list.children.length !== songs.length) {
-    list.innerHTML = songs.map((s) => `<button type="button" class="song-tile" role="radio" data-id="${s.id}"><img src="${s.cover}" alt=""><span>${escapeHtml(s.title)}</span></button>`).join('');
+  const tiles = roomCatalog(view);
+  const key = tiles.map((t) => `${t.id}:${haveSong(t.id)}:${(t.holders || []).map((m) => m.id).join('+')}`).join('|');
+  if (list.dataset.key !== key) {
+    list.dataset.key = key;
+    list.innerHTML = tiles.map((t) => {
+      const label = t.builtIn ? '' : haveSong(t.id) ? 'You have it' : t.holders.length ? `From ${t.holders[0].name}${t.holders.length > 1 ? ` +${t.holders.length - 1}` : ''}` : '';
+      const art = haveSong(t.id) ? `<img src="${SONGS.find((x) => x.id === t.id).cover}" alt="">`
+        : `<span class="tile-art" style="--a:${t.accents[0]};--b:${t.accents[1]}">${escapeHtml(t.title)}</span>`;
+      return `<button type="button" class="song-tile" role="radio" data-id="${t.id}">${art}<span>${escapeHtml(t.title)}</span>${label ? `<em>${escapeHtml(label)}</em>` : ''}</button>`;
+    }).join('');
   }
-  for (const b of list.children) {
-    b.setAttribute('aria-checked', b.dataset.id === r.song);
-    b.disabled = !isHost;
-  }
+  for (const b of list.children) b.setAttribute('aria-checked', b.dataset.id === r.song);
   const song = SONGS.find((s) => s.id === r.song);
   if (song) setTheme(song);
   for (const b of $('room-mode').querySelectorAll('button')) {
     b.setAttribute('aria-checked', b.dataset.v === r.mode);
     b.disabled = !isHost;
   }
-  const here = members.filter((m) => m.here);
   $('room-mode-note').textContent = r.mode === 'turns'
     ? `Each singer takes ${LINES_PER_TURN} lines, in the order on the list, then the next one is up.`
     : 'Everyone sings every line. Highest score wins.';
-  const host = members.find((m) => m.id === r.host);
   $('btn-room-start').hidden = !isHost;
-  $('room-status').textContent = room.error ? `Connection trouble: ${room.error.message}`
-    : isHost ? (here.length < 2 ? 'Send the link to your friends. You can also start alone.' : `${here.length} singers ready.`)
-    : `Waiting for ${host?.name || 'the host'} to start the song.`;
+  renderRoomStatus();
+}
+
+// The line under Start: what the room is waiting for, including songs on their way between friends.
+function renderRoomStatus() {
+  const view = room?.view;
+  if (!view) return;
+  const { members, isHost } = view;
+  const r = view.room;
+  const here = members.filter((m) => m.here);
+  const title = roomCatalog(view).find((t) => t.id === r.song)?.title || 'the song';
+  const { holders, missing } = songHolders(view, r.song);
+  const mine = transfers.get(r.song);
+  const pct = (p) => `${Math.round((p || 0) * 100)}%`;
+  const sending = holders.find((m) => m.live?.xfer?.id === r.song && m.live.xfer.dir === 'send');
+  let status;
+  if (room.error) status = `Connection trouble: ${room.error.message}`;
+  else if (mine?.error) status = `“${title}” didn't arrive: ${mine.error}`;
+  else if (missing.length && !holders.length) status = `Nobody here has “${title}” any more. Pick another song.`;
+  else if (mine?.dir === 'get') status = `Getting “${title}” from ${mine.from}… ${pct(mine.p)}`;
+  else if (missing.length && sending) status = sending.id === view.me ? `Sending “${title}” to the room… ${pct(sending.live.xfer.p)}` : `${sending.name} is sending “${title}”… ${pct(sending.live.xfer.p)}`;
+  else if (missing.some((m) => m.id === view.me)) status = `Waiting for ${holders[0].name} to send “${title}”.`;
+  else if (missing.length) {
+    const getting = missing.find((m) => m.live?.xfer?.id === r.song);
+    status = `Waiting for ${missing.map((m) => m.name).join(', ')} to get “${title}”${getting ? ` (${pct(getting.live.xfer.p)})` : ''}.`;
+  } else if (isHost) status = here.length < 2 ? 'Send the link to your friends. You can also start alone.' : `${here.length} singers ready.`;
+  else status = `Waiting for ${members.find((m) => m.id === r.host)?.name || 'the host'} to start the song.`;
+  $('room-status').textContent = status;
+  $('btn-room-start').disabled = missing.length > 0;
 }
 
 async function connectRoomMic() {
@@ -1049,13 +1165,13 @@ $('room-mic').addEventListener('change', (e) => {
 });
 $('room-songs').addEventListener('click', (e) => {
   const id = e.target.closest('.song-tile')?.dataset.id;
-  if (id && room?.view?.isHost) room.host('set', { song: id }).catch((err) => toast(err.message));
+  if (id && room?.view) room.act('set', { song: id }).catch((err) => toast(err.message));
 });
 $('room-mode').addEventListener('click', (e) => {
   const v = e.target.closest('button')?.dataset.v;
-  if (v && room?.view?.isHost) room.host('set', { mode: v }).catch((err) => toast(err.message));
+  if (v && room?.view?.isHost) room.act('set', { mode: v }).catch((err) => toast(err.message));
 });
-$('btn-room-start').addEventListener('click', () => room?.host('start', {}).catch((err) => toast(err.message)));
+$('btn-room-start').addEventListener('click', () => room?.act('start', {}).catch((err) => toast(err.message)));
 
 // ---------- Add your own song ----------
 const STEPS = [
@@ -1140,6 +1256,7 @@ async function runImport() {
     await saveUserSong(rec);
     const song = userSong(rec);
     SONGS.push(song);
+    sendLibrary();
     renderSelect();
     select(SONGS.length - 1);
     $('import').hidden = true;
@@ -1200,6 +1317,7 @@ $('btn-remove-song').addEventListener('click', async (e) => {
   await deleteUserSong(song.id);
   SONGS.splice(selIndex, 1);
   releaseSong(song);
+  sendLibrary();
   renderSelect();
   select(Math.min(selIndex, SONGS.length - 1));
 });
