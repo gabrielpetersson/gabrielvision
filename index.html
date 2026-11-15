@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data:; media-src 'self' blob: data:; connect-src 'self' blob: data: https://gabrielvision-rooms.deadblock.workers.dev http://localhost:8787 https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data:; media-src 'self' blob: data:; connect-src 'self' blob: data: https://gabrielvision-rooms.deadblock.workers.dev http://localhost:8787 https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Gabriel Singing Contest</title>
   <meta name="description" content="A karaoke singing game in your browser. Sing into your mic, hit the notes, beat your friends.">
@@ -51,6 +51,9 @@
         <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
       </button>
       <div class="mini-logo">Gabriel <b>Singing Contest</b></div>
+      <button class="btn-upload" id="btn-add-song" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Upload song
+      </button>
     </header>
     <div class="select-grid">
       <div class="picker">
@@ -62,9 +65,6 @@
           <p class="best" id="song-best"></p>
         </div>
         <div class="song-actions">
-          <button class="btn-ghost btn-add" id="btn-add-song" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Add your own song
-          </button>
           <button class="btn-ghost" id="btn-remove-song" type="button" hidden>Remove</button>
         </div>
       </div>

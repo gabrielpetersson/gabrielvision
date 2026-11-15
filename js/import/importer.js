@@ -114,7 +114,7 @@ export async function importSong(file, { lyrics = '', server, signal, stage = ()
   }
   const [vocal16k, inst11k] = await Promise.all([resample([vocals.left, vocals.right], 16000), resample(inst, 11025)]);
   stage('lyrics', 0);
-  const read = await readVocal(vocal16k, { words, language }, (s, p) => stage(s === 'model' ? 'lyrics-model' : s === 'pitch' ? 'notes' : 'lyrics', p), signal);
+  const read = await readVocal(vocal16k, { words, language }, (s, p) => stage(s === 'model' ? 'lyrics-model' : s, p), signal);
   stage('lyrics', 1);
 
   stage('notes', 0);

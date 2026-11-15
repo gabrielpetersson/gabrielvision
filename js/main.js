@@ -1065,13 +1065,15 @@ function renderRoom() {
   if ($('room-people').dataset.html !== people) $('room-people').innerHTML = $('room-people').dataset.html = people;
   const list = $('room-songs');
   const tiles = roomCatalog(view);
-  const key = tiles.map((t) => `${t.id}:${haveSong(t.id)}`).join('|');
+  const key = tiles.map((t) => `${t.id}:${haveSong(t.id)}:${(t.holders || []).map((m) => m.id).join('+')}`).join('|');
   if (list.dataset.key !== key) {
     list.dataset.key = key;
     list.innerHTML = '<button type="button" class="song-tile upload" id="room-upload"><span class="tile-art">+</span><span>Upload song</span></button>' + tiles.map((t) => {
       const art = haveSong(t.id) ? `<img src="${SONGS.find((x) => x.id === t.id).cover}" alt="">`
         : `<span class="tile-art" style="--a:${t.accents[0]};--b:${t.accents[1]}">♪</span>`;
-      return `<button type="button" class="song-tile" role="radio" data-id="${escapeHtml(t.id)}">${art}<span>${escapeHtml(t.title)}</span></button>`;
+      // A friend's song you don't have yet says whose it is; it comes over from them when picked.
+      const from = !haveSong(t.id) && t.holders?.length ? `<em>From ${escapeHtml(t.holders[0].name)}${t.holders.length > 1 ? ` +${t.holders.length - 1}` : ''}</em>` : '';
+      return `<button type="button" class="song-tile" role="radio" data-id="${escapeHtml(t.id)}">${art}<span>${escapeHtml(t.title)}</span>${from}</button>`;
     }).join('');
   }
   for (const b of list.querySelectorAll('[data-id]')) b.setAttribute('aria-checked', b.dataset.id === r.song);
