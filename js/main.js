@@ -820,7 +820,10 @@ function renderRanking(g, results) {
     for (const p of g.players) {
       if (p.perf) continue;
       const r = room?.view?.members.find((m) => m.id === p.member)?.result;
-      entries.push(r?.round === g.round ? { name: p.name, color: p.color, ...r } : { name: p.name, color: p.color, score: p.remote.score || 0, pending: true });
+      // A friend's result and live score come from their device: take only the numbers and the title, as plain values.
+      entries.push(r?.round === g.round
+        ? { name: p.name, color: p.color, score: +r.score || 0, accuracy: +r.accuracy || 0, stars: +r.stars || 0, title: String(r.title) }
+        : { name: p.name, color: p.color, score: +p.remote.score || 0, pending: true });
     }
   }
   const ranked = entries.sort((a, b) => b.score - a.score);
@@ -833,7 +836,7 @@ function renderRanking(g, results) {
       <li class="rank-row ${i === 0 && !r.pending ? 'win' : ''}" style="--c:${r.color}; animation-delay:${first ? i * 0.25 : 0}s">
         <span class="rank-num">${i + 1}</span>
         <span class="rank-name"><b>${escapeHtml(r.name)}${i === 0 && ranked.length > 1 && !r.pending ? '<span class="douze">12 points</span>' : ''}</b>
-          <span>${r.pending ? 'Still singing…' : `<span class="title-badge">${r.title}</span> · ${stars(r.stars)}`}</span></span>
+          <span>${r.pending ? 'Still singing…' : `<span class="title-badge">${escapeHtml(r.title)}</span> · ${stars(r.stars)}`}</span></span>
         <span class="rank-score"><b data-count="${r.score}">${first ? 0 : fmtNum(r.score)}</b><span>${r.pending ? '' : `${pct(r.accuracy)} accuracy`}</span></span>
       </li>`)
     .join('');
@@ -971,7 +974,7 @@ async function getSong(id, sender) {
   };
   try {
     xfer(0);
-    const rec = await unpackSong(await room.download(id, sender.live.sent[id], xfer), sender.name);
+    const rec = await unpackSong(await room.download(id, sender.live.sent[id], xfer), sender.name, id);
     await saveUserSong(rec);
     SONGS.push(userSong(rec));
     sendLibrary();
@@ -1066,7 +1069,7 @@ function renderRoom() {
       const label = t.builtIn ? '' : haveSong(t.id) ? 'You have it' : t.holders.length ? `From ${t.holders[0].name}${t.holders.length > 1 ? ` +${t.holders.length - 1}` : ''}` : '';
       const art = haveSong(t.id) ? `<img src="${SONGS.find((x) => x.id === t.id).cover}" alt="">`
         : `<span class="tile-art" style="--a:${t.accents[0]};--b:${t.accents[1]}">${escapeHtml(t.title)}</span>`;
-      return `<button type="button" class="song-tile" role="radio" data-id="${t.id}">${art}<span>${escapeHtml(t.title)}</span>${label ? `<em>${escapeHtml(label)}</em>` : ''}</button>`;
+      return `<button type="button" class="song-tile" role="radio" data-id="${escapeHtml(t.id)}">${art}<span>${escapeHtml(t.title)}</span>${label ? `<em>${escapeHtml(label)}</em>` : ''}</button>`;
     }).join('');
   }
   for (const b of list.children) b.setAttribute('aria-checked', b.dataset.id === r.song);

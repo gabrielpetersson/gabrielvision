@@ -45,18 +45,27 @@ export async function packSong(rec, onProgress) {
   return new Blob([head, json, ...Object.values(parts)], { type: 'application/octet-stream' });
 }
 
-// from: who sent it, kept so the library can say where a song came from.
-export async function unpackSong(blob, from) {
+// A received song is someone else's file and its details end up in this page, so it is checked before it is kept:
+// the id must be the one asked for, the colours real colours, and the parts MP3s and pictures.
+const PART_TYPES = { inst: /^audio\/mpeg$/, vocals: /^audio\/mpeg$/, cover: /^image\/(png|jpe?g|webp|gif)$/, stage: /^image\/(png|jpe?g|webp|gif)$/ };
+const COLOUR = /^#[0-9a-f]{6}$/i;
+
+// from: who sent it, kept so the library can say where a song came from. id: the song asked for.
+export async function unpackSong(blob, from, id) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   if (new TextDecoder().decode(bytes.subarray(0, 4)) !== MAGIC) throw new Error('That song file is damaged.');
   const len = new DataView(bytes.buffer).getUint32(4);
   const header = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + len)));
+  const ok = header.id === id && /^[a-z0-9-]{1,40}$/.test(id) && header.chart && typeof header.chart === 'object'
+    && Array.isArray(header.accents) && header.accents.length === 2 && header.accents.every((c) => COLOUR.test(c))
+    && Array.isArray(header.parts) && header.parts.length === 4 && header.parts.every((p) => PART_TYPES[p.name]?.test(p.type) && p.size >= 0)
+    && new Set(header.parts.map((p) => p.name)).size === 4 && /^([a-z]{2,3}(-[a-z0-9]{2,8})*)?$/i.test(header.chart.language || '');
+  if (!ok) throw new Error('That song file is damaged.');
   let o = 8 + len;
   const part = {};
   for (const p of header.parts) {
     part[p.name] = new Blob([bytes.subarray(o, o + p.size)], { type: p.type });
     o += p.size;
   }
-  const { parts, ...song } = header;
-  return { ...song, where: 'friend', from, ...part };
+  return { id, title: String(header.title || 'Song'), artist: String(header.artist || ''), createdAt: +header.createdAt || Date.now(), accents: header.accents, chart: header.chart, where: 'friend', from, ...part };
 }
