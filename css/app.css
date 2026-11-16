@@ -110,10 +110,6 @@ body[data-screen='results'] .bg-img { filter: blur(14px) brightness(0.45); }
 
 /* ---------- Song select ---------- */
 #select-screen { display: grid; grid-template-rows: auto 1fr; gap: 12px; overflow-y: auto; }
-.select-grid {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 32px;
-  align-items: center; max-width: 1360px; width: 100%; margin: 0 auto; min-height: 0;
-}
 .picker { display: grid; gap: 22px; justify-items: center; min-width: 0; }
 /* Song reels: each row is a drum turning on its upright axis. You see its front: the cover facing you, two each side
    bending away, 30 degrees apart. --s is the cover size, set by the width (five across) and the height (all rows fit);
@@ -589,6 +585,41 @@ body[data-screen='results'] .bg-img { filter: blur(14px) brightness(0.45); }
 .room-status { margin: -12px 0 0; text-align: center; font: 700 14px/1.4 'Archivo', sans-serif; }
 .room-status:empty { display: none; }
 
+/* ---------- Sing alone: three steps ---------- */
+#select-screen { grid-template-rows: auto 1fr; }
+#select-screen .step-pane { display: none; }
+#select-screen[data-step='singers'] [data-pane='singers'],
+#select-screen[data-step='song'] [data-pane='song'],
+#select-screen[data-step='play'] [data-pane='play'] { display: grid; }
+#select-screen:not([data-step='song']) #btn-add-song { visibility: hidden; }
+[data-pane='song'] .picker { width: 100%; }
+.step-pane { align-content: center; justify-items: center; gap: 22px; width: 100%; max-width: 1360px; margin: 0 auto; padding-bottom: 28px; min-height: 0; }
+.steps-nav { display: flex; gap: 6px; margin: 0 auto; }
+.steps-nav button { display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; padding: 6px 10px; border-radius: 99px; font: 800 14px/1 'Archivo', sans-serif; color: rgba(20, 20, 20, 0.55); }
+.steps-nav i { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid currentColor; font: 400 12px/1 'Archivo Black', sans-serif; font-style: normal; }
+.steps-nav button[aria-current] { color: var(--vink); }
+.steps-nav button[aria-current] i { background: var(--vink); border-color: var(--vink); color: var(--vwhite); }
+.pane-card { width: min(520px, 100%); padding: 28px; display: grid; gap: 18px; }
+.pane-card h2 { margin: 0; font: 400 clamp(28px, 3.2vw, 38px)/1.05 'Archivo Black', sans-serif; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pane-card .btn-primary { padding: 20px; font-size: 26px; }
+.pane-next { width: min(420px, 100%); padding: 18px; font-size: 24px; }
+#player-rows { display: grid; gap: 12px; }
+#player-rows .player-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
+#player-rows .player-row .dot { width: 18px; height: 18px; transition: transform 0.08s; }
+#player-rows .player-row input[type='text'] { font: 400 18px/1.2 'Archivo Black', sans-serif; padding: 12px 14px; }
+#player-rows .player-row select { grid-column: 2 / -1; }
+#player-rows .player-row:first-child input { grid-column: 2 / -1; }
+#player-rows .player-row .icon-btn { width: 40px; height: 40px; }
+.seg button:disabled { opacity: 0.4; cursor: default; }
+.words-check { display: flex; align-items: center; gap: 14px; cursor: pointer; }
+.words-check > span:last-child { display: grid; gap: 4px; }
+.words-check .field-note:empty { display: none; }
+.sticker small:empty { display: none; }
+@media (max-width: 760px) {
+  .steps-nav button { padding: 6px 4px; font-size: 0; gap: 0; }
+  .steps-nav i { width: 28px; height: 28px; font-size: 13px; }
+}
+
 /* ---------- Start screen: the turntable ---------- */
 #title-screen { background: var(--deck); color: var(--vink); padding: 0; overflow: hidden; touch-action: none; }
 #title-screen .deck { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; padding: 4vw; gap: 3vw; }
@@ -618,7 +649,7 @@ body[data-screen='results'] .bg-img { filter: blur(14px) brightness(0.45); }
 }
 
 @media (max-width: 900px) {
-  .select-grid, .results-grid { grid-template-columns: minmax(0, 1fr); }
+  .results-grid { grid-template-columns: minmax(0, 1fr); }
   #select-screen { place-items: start stretch; }
   .setup { margin-bottom: 24px; }
 }

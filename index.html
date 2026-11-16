@@ -32,9 +32,8 @@
     <div class="deck">
       <div class="deck-left">
         <h1 class="vlogo">Gabriel<br>Singing<br>Contest</h1>
-        <p class="vtag">The singing game. Drop in any song. Grab the record.</p>
-        <button class="sticker" id="btn-start" type="button" style="--r: -3deg"><span>Sing alone</span><small>just you and the mic</small></button>
-        <button class="sticker sun" id="btn-friends" type="button" style="--r: 2deg"><span>Sing with friends</span><small id="friends-note">send a link, everyone joins</small></button>
+        <button class="sticker" id="btn-start" type="button" style="--r: -3deg"><span>Sing alone</span></button>
+        <button class="sticker sun" id="btn-friends" type="button" style="--r: 2deg"><span>Sing with friends</span><small id="friends-note"></small></button>
         <p class="vhint">Best with headphones</p>
       </div>
       <div class="platter" id="platter">
@@ -51,31 +50,41 @@
         <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
       </button>
       <div class="mini-logo">Gabriel <b>Singing Contest</b></div>
+      <nav class="steps-nav" id="steps-nav" aria-label="Steps">
+        <button type="button" data-step="singers"><i>1</i>Singers</button><button type="button" data-step="song"><i>2</i>Song</button><button type="button" data-step="play"><i>3</i>Play</button>
+      </nav>
       <button class="btn-upload" id="btn-add-song" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Upload song
       </button>
     </header>
-    <div class="select-grid">
+    <div class="step-pane" data-pane="singers">
+      <div class="card pane-card">
+        <h2>Who's singing?</h2>
+        <div id="player-rows"></div>
+        <button class="btn-ghost" id="btn-add-player" type="button">+ Add a singer</button>
+        <div class="seg" id="seg-mode" role="radiogroup" aria-label="How you sing">
+          <button type="button" data-v="together">Together</button><button type="button" data-v="turns">Take turns</button>
+        </div>
+        <button class="btn-primary" type="button" data-next="song">Next</button>
+      </div>
+    </div>
+    <div class="step-pane" data-pane="song">
       <div class="picker">
         <div class="reels" id="reels" role="listbox" aria-label="Songs"></div>
         <div class="song-info">
           <h2 id="song-title"></h2>
           <p class="credit" id="song-credit"></p>
-          <div class="chips" id="song-chips"></div>
           <p class="best" id="song-best"></p>
         </div>
         <div class="song-actions">
           <button class="btn-ghost" id="btn-remove-song" type="button" hidden>Remove</button>
         </div>
       </div>
-      <aside class="setup glass">
-        <h3>Who's singing</h3>
-        <div class="seg" id="seg-mode" role="radiogroup" aria-label="How you sing">
-          <button type="button" data-v="together">All at once</button><button type="button" data-v="turns">Take turns</button>
-        </div>
-        <p class="field-note mode-note" id="mode-note"></p>
-        <div id="player-rows"></div>
-        <button class="btn-ghost" id="btn-add-player" type="button">+ Add a singer</button>
+      <button class="btn-primary pane-next" type="button" data-next="play">Next</button>
+    </div>
+    <div class="step-pane" data-pane="play">
+      <div class="card pane-card">
+        <h2 id="play-title"></h2>
         <div class="field">
           <span class="field-label">Difficulty</span>
           <div class="seg" id="seg-difficulty" role="radiogroup" aria-label="Difficulty">
@@ -88,16 +97,12 @@
             <button type="button" data-v="off">Off</button><button type="button" data-v="soft">Soft</button><button type="button" data-v="full">Full</button>
           </div>
         </div>
-        <div class="field field-row">
-          <label class="switch"><input type="checkbox" id="opt-lyrics"><span class="knob"></span></label>
-          <div>
-            <span class="field-label">Lyric check</span>
-            <p class="field-note" id="lyrics-status">A speech model checks that you sing the words, not just hum.</p>
-          </div>
-        </div>
+        <label class="field-row words-check">
+          <span class="switch"><input type="checkbox" id="opt-lyrics"><span class="knob"></span></span>
+          <span><span class="field-label">Check the words</span><span class="field-note" id="lyrics-status"></span></span>
+        </label>
         <button class="btn-primary" id="btn-sing" type="button">Sing</button>
-        <button class="btn-ghost" id="btn-demo" type="button">Watch the demo singer</button>
-      </aside>
+      </div>
     </div>
   </section>
 
@@ -213,7 +218,7 @@
         </label>
         <details class="lyrics-box">
           <summary>Paste the lyrics (optional)</summary>
-          <textarea id="import-lyrics" rows="7" placeholder="One line per row. With the real lyrics, every word and line comes out right."></textarea>
+          <textarea id="import-lyrics" rows="7" placeholder="One line per row"></textarea>
         </details>
         <p class="field-note" id="import-where"></p>
         <button class="btn-primary" id="import-go" type="button" disabled>Make it singable</button>

@@ -61,7 +61,7 @@ function ensureChecker(language = SONGS[selIndex]?.chartData?.language ?? null) 
     checker = new LyricChecker(language, (s) => {
       const el = $('lyrics-status');
       if (s.status === 'loading') el.textContent = `Loading the speech model… ${Math.round((s.progress || 0) * 100)}%`;
-      else if (s.status === 'ready') el.textContent = 'Speech model ready. It checks that you sing the words, not just hum.';
+      else if (s.status === 'ready') el.textContent = '';
       else if (s.status === 'error') el.textContent = `Lyric check unavailable: ${s.message}`;
     });
   }
@@ -154,17 +154,35 @@ let lastFx = performance.now();
 })(lastFx);
 
 // ---------- Title ----------
-async function enterSelect() {
+// The Sing alone screen goes in three steps: who's singing, which song, then settings and Sing.
+const STEPS_ORDER = ['singers', 'song', 'play'];
+function setStep(step) {
+  $('select-screen').dataset.step = step;
+  for (const b of $('steps-nav').children) b.toggleAttribute('aria-current', b.dataset.step === step);
+  if (step === 'play') $('play-title').textContent = SONGS[selIndex].title;
+  $('select-screen').scrollTop = 0;
+}
+
+async function enterSelect(step = 'singers') {
   await ensureEngine();
   await loadUserSongs();
   show('select');
+  setStep(step);
   renderSelect();
   if (settings.lyrics) ensureChecker();
   SONGS.forEach((s) => loadChart(s).then(() => s === SONGS[selIndex] && renderSongInfo()).catch(() => {}));
   connectMonitors();
 }
 $('btn-start').addEventListener('click', () => enterSelect());
-$('btn-home').addEventListener('click', () => { stopMonitors(); show('title'); setStage('img/stage-title.jpg'); });
+$('btn-home').addEventListener('click', () => {
+  const i = STEPS_ORDER.indexOf($('select-screen').dataset.step);
+  if (i > 0) return setStep(STEPS_ORDER[i - 1]);
+  stopMonitors();
+  show('title');
+  setStage('img/stage-title.jpg');
+});
+$('steps-nav').addEventListener('click', (e) => { const s = e.target.closest('button')?.dataset.step; if (s) setStep(s); });
+for (const b of document.querySelectorAll('#select-screen [data-next]')) b.addEventListener('click', () => setStep(b.dataset.next));
 
 // ---------- Song select ----------
 let userSongsLoaded = null;
@@ -257,19 +275,8 @@ function select(i) {
 function renderSongInfo() {
   const song = SONGS[selIndex];
   $('song-title').textContent = song.title;
-  const chips = [`<span class="chip accent">${song.style}</span>`, `<span class="chip">${song.level}</span>`];
-  loadChart(song)
-    .then((chart) => {
-      if (song !== SONGS[selIndex]) return;
-      $('song-credit').textContent = chart.credit;
-      chips.push(`<span class="chip">${Math.round(chart.bpm)} BPM</span>`, `<span class="chip">${fmtTime(chart.duration)}</span>`);
-      $('song-chips').innerHTML = chips.join('');
-    })
-    .catch(() => {
-      $('song-credit').textContent = 'This song is still being recorded.';
-      $('song-chips').innerHTML = chips.join('');
-    });
-  $('song-chips').innerHTML = chips.join('');
+  $('song-credit').textContent = '';
+  loadChart(song).then((chart) => song === SONGS[selIndex] && ($('song-credit').textContent = chart.credit)).catch(() => {});
   const top = leaderboard(song.id)[0];
   $('song-best').textContent = top ? `Best: ${fmtNum(top.score)} by ${top.name}` : '';
   const remove = $('btn-remove-song');
@@ -313,7 +320,7 @@ $('reels').addEventListener('click', (e) => {
   const cover = e.target.closest('.cover');
   if (!cover || $('reels').dataset.dragged) return;
   const i = +cover.dataset.i;
-  i === selIndex ? startGame({ mode: 'mic' }) : select(i);
+  i === selIndex ? setStep('play') : select(i);
 });
 // A sideways swipe on a trackpad (or shift + wheel) spins the reel under it; an up-down wheel still scrolls the page.
 let reelWheel = 0;
@@ -332,19 +339,15 @@ function renderSetup() {
   const rows = $('player-rows');
   rows.innerHTML = '';
   settings.players.forEach((p, i) => {
-    // Taking turns shares the first singer's microphone, so only that row picks one.
+    // Taking turns shares the first singer's microphone, so only that row can pick one.
     const mic = !turns || i === 0;
     const row = document.createElement('div');
     row.className = 'player-row';
     row.style.setProperty('--c', PLAYER_COLORS[i]);
-    row.innerHTML = `
-      <span class="dot"></span>
-      <div class="player-head">
-        <input type="text" id="p${i}-name" maxlength="18" aria-label="Singer ${i + 1} name" value="">
-        ${i > 0 ? `<button class="icon-btn" type="button" id="p${i}-remove" aria-label="Remove singer ${i + 1}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
-      </div>
-      ${mic ? `<select id="p${i}-mic" aria-label="${turns ? 'Microphone everyone shares' : `Microphone for singer ${i + 1}`}"><option value="">Default microphone</option></select>
-      <div class="meter"><span class="bar"><i id="p${i}-level"></i></span><span class="note" id="p${i}-note">–</span></div>` : ''}`;
+    row.innerHTML = `<span class="dot" id="p${i}-level"></span>
+      <input type="text" id="p${i}-name" maxlength="18" aria-label="Singer ${i + 1} name">
+      ${i > 0 ? `<button class="icon-btn" type="button" id="p${i}-remove" aria-label="Remove singer ${i + 1}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>` : ''}
+      ${mic ? `<select id="p${i}-mic" aria-label="Microphone" hidden></select>` : ''}`;
     rows.appendChild(row);
     const name = row.querySelector(`#p${i}-name`);
     name.value = p.name;
@@ -361,11 +364,10 @@ function renderSetup() {
       connectMonitors();
     });
   });
-  const max = MAX_PLAYERS[settings.mode];
-  $('btn-add-player').hidden = settings.players.length >= max;
-  $('mode-note').textContent = turns
-    ? `Pass one mic around: each singer takes ${LINES_PER_TURN} lines, then the next one is up. Up to ${max} singers.`
-    : 'Everyone sings every line, each on their own mic. Up to two singers.';
+  // One singer has nothing to choose; more than two can only take turns on one mic.
+  $('btn-add-player').hidden = settings.players.length >= MAX_PLAYERS.turns;
+  $('seg-mode').hidden = settings.players.length < 2;
+  $('seg-mode').querySelector('[data-v="together"]').disabled = settings.players.length > MAX_PLAYERS.together;
   fillMicLists();
   for (const [id, key] of [['seg-mode', 'mode'], ['seg-difficulty', 'difficulty'], ['seg-guide', 'guide']]) {
     for (const b of $(id).querySelectorAll('button')) b.setAttribute('aria-checked', b.dataset.v === settings[key]);
@@ -373,30 +375,33 @@ function renderSetup() {
   $('opt-lyrics').checked = settings.lyrics;
 }
 
+// A microphone list only shows when this device has more than one microphone.
 async function fillMicLists() {
   let mics = [];
-  try { mics = await listMics(); } catch {}
+  try { mics = (await listMics()).filter((m) => m.deviceId && m.deviceId !== 'default'); } catch {}
   settings.players.forEach((p, i) => {
     const sel = $(`p${i}-mic`);
     if (!sel) return;
-    sel.innerHTML = '<option value="">Default microphone</option>' +
-      mics.filter((m) => m.deviceId && m.deviceId !== 'default').map((m, k) => `<option value="${m.deviceId}">${m.label || `Microphone ${k + 1}`}</option>`).join('');
+    sel.innerHTML = '<option value="">Default microphone</option>' + mics.map((m, k) => `<option value="${m.deviceId}">${m.label || `Microphone ${k + 1}`}</option>`).join('');
     sel.value = mics.some((m) => m.deviceId === p.deviceId) ? p.deviceId : '';
+    sel.hidden = mics.length < 2;
   });
 }
 
 $('btn-add-player').addEventListener('click', () => {
-  settings.players.push({ name: `Player ${settings.players.length + 1}`, deviceId: '' });
+  let k = 1;
+  while (settings.players.some((p) => p.name === `Player ${k}`)) k++;
+  settings.players.push({ name: `Player ${k}`, deviceId: '' });
+  if (settings.players.length > MAX_PLAYERS.together) settings.mode = 'turns';
   saveSettings();
   renderSetup();
   connectMonitors();
 });
 for (const [id, key] of [['seg-mode', 'mode'], ['seg-difficulty', 'difficulty'], ['seg-guide', 'guide']]) {
   $(id).addEventListener('click', (e) => {
-    const v = e.target.closest('button')?.dataset.v;
+    const v = e.target.closest('button:not(:disabled)')?.dataset.v;
     if (!v) return;
     settings[key] = v;
-    if (key === 'mode') settings.players.splice(MAX_PLAYERS[v]);
     saveSettings();
     renderSetup();
     if (key === 'mode') connectMonitors();
@@ -406,12 +411,11 @@ $('opt-lyrics').addEventListener('change', (e) => {
   settings.lyrics = e.target.checked;
   saveSettings();
   if (settings.lyrics) ensureChecker();
-  else $('lyrics-status').textContent = 'Off: only your pitch is scored.';
+  else $('lyrics-status').textContent = '';
 });
 $('btn-sing').addEventListener('click', () => startGame({ mode: 'mic' }));
-$('btn-demo').addEventListener('click', () => startGame({ mode: 'demo' }));
 
-// Live mic level + note readout on the setup panel, so players can check their mic before singing.
+// Each singer's dot pulses with their mic, so they can check it works before singing.
 async function connectMonitors() {
   stopMonitors();
   await ensureEngine();
@@ -423,7 +427,6 @@ async function connectMonitors() {
       await m.connect();
       monitors.push(m);
     } catch (err) {
-      $(`p${i}-note`).textContent = '';
       micError(err);
       return;
     }
@@ -433,10 +436,8 @@ async function connectMonitors() {
     if (!monitors.length || document.body.dataset.screen !== 'select') return;
     monitors.forEach((m, i) => {
       m.drain();
-      const lvl = $(`p${i}-level`), note = $(`p${i}-note`);
-      if (lvl) lvl.style.width = `${Math.round(m.level * 100)}%`;
-      const last = m.history[m.history.length - 1];
-      if (note) note.textContent = last?.midi != null ? midiName(last.midi) : '–';
+      const dot = $(`p${i}-level`);
+      if (dot) dot.style.transform = `scale(${1 + Math.min(1, m.level * 2) * 0.8})`;
     });
     requestAnimationFrame(tick);
   };
@@ -458,7 +459,7 @@ async function getStream(i) {
 }
 
 function micError(err) {
-  if (err?.name === 'NotAllowedError') toast('Microphone blocked. Allow it in the address bar, then reload. You can still watch the demo singer.');
+  if (err?.name === 'NotAllowedError') toast('Microphone blocked. Allow it in the address bar, then reload.');
   else if (err?.name === 'NotFoundError' || err?.name === 'OverconstrainedError') toast('No microphone found. Plug one in or pick another in the list.');
   else toast(`Microphone error: ${err?.message || err}`);
 }
@@ -866,7 +867,7 @@ $('btn-quit').addEventListener('click', async () => {
   await engine.unpause();
   const inRoom = game?.inRoom;
   stopGame();
-  inRoom ? showRoom() : enterSelect();
+  inRoom ? showRoom() : enterSelect('song');
 });
 $('opt-latency').addEventListener('input', (e) => {
   settings.latency = +e.target.value;
@@ -985,7 +986,7 @@ function renderCoach(results, idx) {
 }
 
 $('btn-again').addEventListener('click', () => startGame(lastOpts()));
-$('btn-songs').addEventListener('click', () => enterSelect());
+$('btn-songs').addEventListener('click', () => enterSelect('song'));
 const lastOpts = () => lastGameOpts || { mode: 'mic' };
 
 // ---------- Sing with friends: rooms ----------
@@ -1304,7 +1305,7 @@ async function openImport(file) {
   const { gpuDevice } = await import('./import/importer.js');
   const gpu = await gpuDevice();
   $('import-where').textContent = gpu
-    ? 'Runs on this device, so your song never leaves it. The first time it downloads about 150 MB of models.'
+    ? 'The first time, this downloads about 150 MB.'
     : SERVER
       ? "This browser can't use the graphics chip, so our server does the heavy part. Your file is deleted right after."
       : "This browser can't use the graphics chip, so it runs slowly here: a few minutes per minute of song.";
@@ -1315,7 +1316,7 @@ function setImportFile(file) {
   $('drop').classList.toggle('has-file', !!file);
   const touch = matchMedia('(pointer: coarse)').matches;
   $('drop-title').textContent = file ? file.name : touch ? 'Tap to choose a song' : 'Drop a song here';
-  $('drop-note').textContent = file ? `${(file.size / 1e6).toFixed(1)} MB · ${touch ? 'tap' : 'click'} to pick another` : `${touch ? 'Any' : 'or click to choose one. Any'} audio or video file with singing.`;
+  $('drop-note').textContent = file ? `${(file.size / 1e6).toFixed(1)} MB` : '';
   $('import-go').disabled = !file;
 }
 
@@ -1386,7 +1387,7 @@ async function runImport() {
     if (document.body.dataset.screen === 'room') {
       renderRoom();
       room?.act('set', { song: song.id }).catch((err) => toast(err.message));
-    } else toast(`“${rec.title}” is ready: ${rec.chart.lines.length} lines found in ${secs} s. Press Sing.`, 'ok');
+    } else toast(`“${rec.title}” is ready`, 'ok');
     window.__gv.imported = { id: rec.id, lines: rec.chart.lines.length, secs, where: rec.where, language: rec.chart.language };
   } catch (err) {
     if (err?.name === 'AbortError') return;
@@ -1456,13 +1457,15 @@ document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select, textarea') || !$('import').hidden || !$('name-ask').hidden) return;
   const screen = document.body.dataset.screen;
   if (screen === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); enterSelect(); }
-  else if (screen === 'select') {
+  else if (screen === 'select' && e.key === 'Enter' && e.target === document.body) {
+    const step = $('select-screen').dataset.step;
+    step === 'play' ? startGame({ mode: 'mic' }) : setStep(STEPS_ORDER[STEPS_ORDER.indexOf(step) + 1]);
+  } else if (screen === 'select' && $('select-screen').dataset.step === 'song') {
     // Left and right spin the reel you're on; up and down move to the song in front on the reel above or below.
     const r = Math.floor(selIndex / reelSize());
     const to = r + (e.key === 'ArrowDown') - (e.key === 'ArrowUp');
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') spinReel(r, e.key === 'ArrowLeft' ? -1 : 1);
     else if (to !== r && reels()[to]) { e.preventDefault(); select(to * reelSize() + reelFront[to]); }
-    else if (e.key === 'Enter' && e.target === document.body) startGame({ mode: 'mic' });
   } else if (screen === 'game' && (e.key === 'Escape' || e.key === 'p')) {
     $('pause').hidden ? pause() : resume();
   } else if (screen === 'results' && e.key === 'Enter' && e.target === document.body) startGame(lastOpts());
