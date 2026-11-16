@@ -1,8 +1,10 @@
+// @ts-check
 // Uploaded songs live in this browser's IndexedDB: tracks, chart and artwork stay on the device.
 
 const DB = 'gabrielvision';
 const STORE = 'songs';
 
+/** @returns {Promise<IDBDatabase>} */
 function open() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, 1);
@@ -12,6 +14,7 @@ function open() {
   });
 }
 
+/** @template T @param {IDBTransactionMode} mode @param {(s: IDBObjectStore) => IDBRequest<T>} fn @returns {Promise<T>} */
 async function tx(mode, fn) {
   const db = await open();
   return new Promise((resolve, reject) => {
@@ -23,7 +26,11 @@ async function tx(mode, fn) {
   });
 }
 
+/** @returns {Promise<SongRecord[]>} */
 export const listUserSongs = () => tx('readonly', (s) => s.getAll()).then((all) => all.sort((a, b) => a.createdAt - b.createdAt));
+/** @param {string} id @returns {Promise<SongRecord | undefined>} */
 export const getUserSong = (id) => tx('readonly', (s) => s.get(id));
+/** @param {SongRecord} song */
 export const saveUserSong = (song) => tx('readwrite', (s) => s.put(song));
-export const deleteUserSong = (id) => tx('readwrite', (s) => s.delete(id));
+/** @param {string} id */
+export const deleteUserSong = (id) => tx('readwrite', (s) => s.delete(id)); // devweb/tests/variants.html

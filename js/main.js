@@ -1,3 +1,4 @@
+// @ts-check
 import { AudioEngine } from './audio-engine.js';
 import { VoiceInput, openMic } from './voice-input.js';
 import { Performance, DIFFICULTY } from './scoring.js';
@@ -6,31 +7,24 @@ import { LyricChecker, lyricMatch } from './lyric-check.js';
 import { SONGS, loadChart, userSong, releaseSong, isOutdated } from './songs.js';
 import { listUserSongs, getUserSong, saveUserSong } from './import/song-store.js';
 import { packSong, unpackSong } from './share.js';
-import { SERVER } from './import/server.js';
 import { Room, inviteLink, roomInLink } from './room.js';
+import { $, $$, clamp, pad, esc, fmt, fmtTime, reduced, segs, segbar, starRow, setLcd, Slide, makeEncoder } from './controls.js';
 
 // The game is one instrument: a device face with screens for who's singing, the song, the settings, the song itself
-// and the results. People singing on this device and friends who joined through the invite link share one channel
-// rack; a friend's phone shows its own small screen (guest) until the host presses Sing.
+// and the results. A device has one microphone. Several people on one device take turns on it; singing together
+// means each singer on their own device, joined through the invite link. A friend's phone shows its own small screen
+// (guest) until the host presses Sing.
 
-const $ = (id) => document.getElementById(id);
-const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const pad = (n) => String(n).padStart(2, '0');
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const fmt = (n) => Math.round(n).toLocaleString('en-US');
-const fmtTime = (s) => `${Math.floor(Math.max(0, s) / 60)}:${pad(Math.floor(Math.max(0, s) % 60))}`;
-const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 const phone = matchMedia('(max-width: 1180px)');
-
 const COLORS = ['#6EF3FF', '#FF77B7', '#B8FF6B', '#FFB547', '#A98BFF', '#FF8A5B'];
+/** @param {number} i */
 const color = (i) => COLORS[i % COLORS.length];
-const MAX_SINGERS = 6;
-const MAX_MICS_HERE = 2; // singing together needs a mic per singer on this device
-const LINES_PER_TURN = 2;
-const DIFFS = ['easy', 'normal', 'hard'];
-const GUIDES = ['off', 'soft', 'full'];
+const MAX_SINGERS = 6; // the rack's channels; rooms/worker.js has the same limit
+const MODES = /** @type {const} */ (['together', 'turns']);
+const DIFFS = /** @type {const} */ (['easy', 'normal', 'hard']);
+const GUIDES = /** @type {const} */ (['off', 'soft', 'full']);
 const GUIDE_LEVEL = { off: 0, soft: 0.28, full: 0.9 };
+const ROOM_LATE_MS = 15000; // a song that started longer ago than this is left to finish without this device
 const params = new URLSearchParams(location.search);
 const G = {
   plus: '<svg class="g" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>',
@@ -40,58 +34,74 @@ const G = {
   done: '<svg class="g" viewBox="0 0 24 24" aria-label="Done"><path d="M5.5 12.5 10 17l8.5-9.5"/></svg>',
 };
 const INVITE_LEGEND = `${G.link}<span>Copy link to invite online friends</span>`;
+/** @param {number} ms */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** @param {unknown} err */
+const message = (err) => (err instanceof Error ? err.message : String(err));
 
 // ---------- Settings (per browser) ----------
-const store = {
-  get(key, fallback) {
-    try { return JSON.parse(localStorage.getItem('gv:' + key)) ?? fallback; } catch { return fallback; }
-  },
-  set(key, value) {
-    try { localStorage.setItem('gv:' + key, JSON.stringify(value)); } catch {}
-  },
-};
-const settings = Object.assign(
-  { players: [{ name: 'Player 1', deviceId: '' }], mode: 'together', difficulty: 'normal', guide: 'soft', speakers: false, lyrics: true, latency: 0, songId: 'twinkle' },
-  store.get('settings', {}),
-);
-// Member ids of this device's seats in a room live only as long as the room; they are never stored.
-const saveSettings = () => store.set('settings', { ...settings, players: settings.players.map(({ name, deviceId }) => ({ name, deviceId })) });
+/** What this browser remembered, checked field by field (an older version may have stored other shapes).
+ * @returns {Settings} */
+function loadSettings() {
+  /** @type {any} */
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem('gv:settings') || '{}') || {}; } catch {}
+  /** @template {string} T @param {unknown} v @param {readonly T[]} list @returns {T} */
+  const oneOf = (v, list) => (list.includes(/** @type {T} */ (v)) ? /** @type {T} */ (v) : list[0]);
+  const players = (Array.isArray(s.players) ? s.players : [])
+    .map((/** @type {any} */ p) => String(p?.name ?? '').trim().slice(0, 18)).filter(Boolean).slice(0, MAX_SINGERS).map((/** @type {string} */ name) => ({ name }));
+  return {
+    players: players.length ? players : [{ name: 'Player 1' }],
+    mode: oneOf(s.mode, MODES),
+    difficulty: DIFFS.includes(s.difficulty) ? s.difficulty : 'normal',
+    guide: GUIDES.includes(s.guide) ? s.guide : 'soft',
+    speakers: s.speakers === true,
+    lyrics: s.lyrics !== false,
+    latency: clamp(Math.round(+s.latency || 0), 0, 300),
+    songId: typeof s.songId === 'string' ? s.songId : SONGS[0].id,
+  };
+}
+const settings = loadSettings();
+const saveSettings = () => { try { localStorage.setItem('gv:settings', JSON.stringify(settings)); } catch {} };
 
 // ---------- State ----------
+/** @type {AudioEngine | null} */
 let engine = null;
+/** @type {StageRenderer | null} */
 let renderer = null;
+/** @type {LyricChecker | null} */
 let checker = null;
+/** @type {Game | null} the song being sung (or loading, or counting in) */
 let game = null;
+/** @type {Room | null} */
 let room = null;
 let screen = '';
-let lastGameOpts = null;
-const streams = [];
-const monitors = [];
 window.__gv = { results: null, status: 'boot' };
 const device = $('device');
 
 function ensureEngine() {
-  if (!engine) engine = new AudioEngine();
-  return engine.resume().then(() => engine);
+  engine ||= new AudioEngine();
+  const e = engine;
+  return e.resume().then(() => e);
 }
 
-// One speech model at a time: English-only for built-in songs (language null), the multilingual one for uploads.
-function ensureChecker(language = selectedSong()?.chartData?.language ?? null) {
-  if (checker && checker.language !== language) {
+/** The speech model for the words check, one at a time: English-only for built-in songs (language null), the
+ * multilingual one for uploads. @param {string | null} language */
+function ensureChecker(language) {
+  if (checker && (checker.language !== language || checker.dead)) {
     checker.dispose();
     checker = null;
   }
-  if (!checker) {
-    checker = new LyricChecker(language, (s) => {
-      checker.state = s;
-      if (screen === 'settings') syncWords();
-      if (s.status === 'error') toast(`The words check isn't available: ${s.message}`);
-    });
-  }
-  checker.load().catch(() => {});
+  checker ||= new LyricChecker(language, (s) => {
+    if (screen === 'settings') syncWords();
+    if (s.status === 'error') toast(`The words check isn't available: ${s.message}`);
+  });
   return checker;
 }
+/** @param {Song | undefined} s */
+const languageOf = (s) => (s?.kind === 'upload' ? s.chart.language ?? null : null);
 
+/** @param {string} msg */
 function toast(msg) {
   const t = $('toast');
   t.textContent = msg;
@@ -99,184 +109,138 @@ function toast(msg) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => (t.hidden = true), 6000);
 }
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+toast.timer = undefined;
 
-// ---------- Small builders ----------
-const svgURI = (s) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
-const seeded = (n) => () => (n = (n * 16807) % 2147483647) / 2147483647;
-// A friend's song that isn't on this device yet has no art here: rings in the song's own colours.
-function coverFor(title, accents = []) {
-  let h = 7;
-  for (const ch of title) h = (h * 31 + ch.charCodeAt(0)) % 2147483647;
-  const rnd = seeded(h || 7);
-  const bg = '#141414', fg = accents[1] || '#fffef9', acc = accents[0] || '#ffd23f';
-  let s = `<rect width="640" height="640" fill="${bg}"/>`;
-  const n = 4 + Math.floor(rnd() * 4);
-  for (let i = n; i > 0; i--) s += `<circle cx="${200 + rnd() * 240}" cy="${200 + rnd() * 240}" r="${i * 46}" fill="none" stroke="${i === 1 ? acc : fg}" stroke-width="${i === 1 ? 46 : 8}" opacity="${i === 1 ? 1 : 0.7}"/>`;
-  return svgURI(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">${s}</svg>`);
+// ---------- The microphone: one per device ----------
+/** @type {{ stream: MediaStream, speakers: boolean } | null} */
+let mic = null;
+/** @type {VoiceInput | null} drives the mic meters on the singers and guest screens */
+let monitor = null;
+
+// The Sound switch decides how the mic opens (echo cancellation for speakers), so a change reopens it.
+async function micStream() {
+  if (mic && mic.speakers === settings.speakers && mic.stream.active) return mic.stream;
+  releaseMic();
+  const stream = await openMic(settings.speakers);
+  mic = { stream, speakers: settings.speakers };
+  return stream;
 }
-const segs = (pct) => { const lit = Math.floor(pct / 10); return Array.from({ length: 10 }, (_, i) => `<i class="${i < lit ? 'on' : i === lit ? 'now' : ''}"></i>`).join(''); };
-const segbar = (frac) => `<div class="segbar">${Array.from({ length: 20 }, (_, i) => `<i class="${i < frac * 20 ? 'on' : ''}"></i>`).join('')}</div>`;
-const starRow = (n) => Array.from({ length: 5 }, (_, i) => {
-  const fill = n >= i + 1 ? 'currentColor' : n > i ? 'url(#half)' : 'none';
-  return `<svg viewBox="0 0 24 24"><use href="#star" fill="${fill}" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
-}).join('');
-function setLcd(el, html, dir = 0) {
-  const scr = el.querySelector('.lcd__screen');
-  scr.innerHTML = html;
-  if (dir && !reduced.matches) scr.firstElementChild?.animate([{ opacity: 0, transform: `translateX(${dir * 10}px)` }, { opacity: 1, transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)' });
+// Nothing listens between screens: the browser's recording light goes off when the mic isn't needed.
+function releaseMic() {
+  mic?.stream.getTracks().forEach((t) => t.stop());
+  mic = null;
 }
-// A filling meter gets as many LEDs as fit its column.
-function fitMeters() { for (const m of $$('.screen.is-on .meter--fill')) m.innerHTML = '<i class="led"></i>'.repeat(phone.matches ? 10 : clamp(Math.floor((m.clientWidth - 15) / 14), 8, 28)); }
-addEventListener('resize', () => { if (screen === 'singers' || screen === 'guest') fitMeters(); });
+async function startMonitor() {
+  stopMonitor();
+  const on = screen;
+  try {
+    const e = await ensureEngine();
+    const m = new VoiceInput(e, { kind: 'mic', stream: await micStream() });
+    await m.connect();
+    if (screen === on && !monitor) monitor = m;
+    else m.disconnect();
+  } catch (err) {
+    micError(err);
+  }
+}
+function stopMonitor() {
+  monitor?.disconnect();
+  monitor = null;
+  if (!game) releaseMic();
+}
+/** @param {unknown} err */
+function micError(err) {
+  const name = err instanceof DOMException ? err.name : '';
+  if (name === 'NotAllowedError') toast('Microphone blocked. Allow it in the address bar, then reload.');
+  else if (name === 'NotFoundError' || name === 'OverconstrainedError') toast('No microphone found. Plug one in and try again.');
+  else toast(`Microphone error: ${message(err)}`);
+}
 
 // ---------- Songs: built in, uploaded on this device, and friends' songs in the room ----------
+/** @type {Promise<void> | null} */
 let userSongsLoaded = null;
 function loadUserSongs() {
-  userSongsLoaded ||= listUserSongs()
-    .then((recs) => recs.forEach((r) => SONGS.push(userSong(r))))
-    .catch((err) => console.warn('Could not read your saved songs', err));
+  userSongsLoaded ||= listUserSongs().then((recs) => {
+    let bad = 0;
+    for (const r of recs) {
+      try { SONGS.push(userSong(r)); } catch { bad++; }
+    }
+    if (bad) toast(`${bad} of your songs couldn't be opened.`);
+  }, (err) => toast(`Your songs couldn't be read: ${message(err)}`));
   return userSongsLoaded;
 }
-const credit = new Map(); // song id -> chart credit, once its chart has loaded
+/** @type {Map<string, { by: string, len: string }>} built-in songs' credit and length, once their charts load */
+const credit = new Map();
+/** @param {string} id */
 const haveSong = (id) => SONGS.some((s) => s.id === id);
-const builtIn = (id) => SONGS.some((s) => s.id === id && !s.user);
+/** @param {string} id */
+const builtIn = (id) => SONGS.some((s) => s.id === id && s.kind === 'builtin');
 
-// Every song this device can pick: what's here, then songs friends in the room have that aren't here yet.
+/** A friend's song that isn't on this device yet has no art here: rings in the song's own colours.
+ * @param {string} title @param {string[]} accents */
+function coverFor(title, accents) {
+  let h = 7;
+  for (const ch of title) h = (h * 31 + ch.charCodeAt(0)) % 2147483647;
+  let n = h || 7;
+  const rnd = () => (n = (n * 16807) % 2147483647) / 2147483647;
+  const fg = accents[1] || '#fffef9', acc = accents[0] || '#ffd23f';
+  let s = '<rect width="640" height="640" fill="#141414"/>';
+  for (let i = 4 + Math.floor(rnd() * 4); i > 0; i--) s += `<circle cx="${200 + rnd() * 240}" cy="${200 + rnd() * 240}" r="${i * 46}" fill="none" stroke="${i === 1 ? acc : fg}" stroke-width="${i === 1 ? 46 : 8}" opacity="${i === 1 ? 1 : 0.7}"/>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">${s}</svg>`);
+}
+
+/** Every song this device can pick: what's here, then songs friends in the room have that aren't here yet.
+ * @returns {SongPick[]} */
 function catalog() {
-  const list = SONGS.map((s) => ({
-    id: s.id, song: s, title: s.title, cover: s.cover, yours: !!s.user,
-    by: s.user ? s.artist || '' : credit.get(s.id) || '',
-    len: s.chartData ? fmtTime(s.chartData.duration) : credit.has(`${s.id}:len`) ? credit.get(`${s.id}:len`) : '',
-  }));
+  /** @type {SongPick[]} */
+  const list = SONGS.map((s) => s.kind === 'upload'
+    ? { kind: 'here', id: s.id, song: s, title: s.title, by: s.artist, cover: s.cover, len: fmtTime(s.chart.duration) }
+    : { kind: 'here', id: s.id, song: s, title: s.title, by: credit.get(s.id)?.by ?? '', cover: s.cover, len: credit.get(s.id)?.len ?? '' });
   const v = room?.view;
   if (v) {
-    for (const m of v.members.filter((x) => x.here && !v.mine.includes(x.id))) {
+    for (const m of v.members) {
+      if (!m.here || v.mine.includes(m.id)) continue;
       for (const e of m.library) {
         if (list.some((x) => x.id === e.id)) continue;
         const t = transfers.get(e.id);
-        list.push({ id: e.id, title: e.title, by: e.artist, cover: coverFor(e.title, e.accents), len: e.duration ? fmtTime(e.duration) : '', from: m.name, pct: Math.round((t?.p ?? 0) * 100) });
+        list.push({ kind: 'friend', id: e.id, title: e.title, by: e.artist, cover: coverFor(e.title, e.accents), len: e.duration ? fmtTime(e.duration) : '', from: m.name, pct: t?.dir === 'get' ? Math.round(t.p * 100) : 0 });
       }
     }
   }
   return list;
 }
-const selectedId = () => room?.view?.room.song || settings.songId;
-const selectedSong = () => SONGS.find((s) => s.id === selectedId()) || SONGS[0];
+const selectedId = () => room?.view?.room.song || (haveSong(settings.songId) ? settings.songId : SONGS[0].id);
+const selectedSong = () => SONGS.find((s) => s.id === selectedId());
 function selIndex(list = catalog()) {
-  const i = list.findIndex((x) => x.id === selectedId());
-  return i < 0 ? 0 : i;
+  return Math.max(0, list.findIndex((x) => x.id === selectedId()));
 }
 
+/** @param {SongPick} s */
+const tags = (s) => (s.kind === 'here' ? (s.song.kind === 'upload' ? '<i class="tag">Yours</i>' : '') : `<i class="tag">From ${esc(s.from)}</i>`);
+/** @param {SongPick} s @param {number} i @param {number} total */
 const lcdSong = (s, i, total) => `<div class="lcd__in">
   <img class="lcd__cover" src="${s.cover}" alt="">
-  <div class="lcd__bar"><span><span><b>${pad(i + 1)}</b>/${pad(total)}</span></span><span>${s.yours ? '<i class="tag">Yours</i>' : ''}${s.from ? `<i class="tag">From ${esc(s.from)}</i>` : ''}${s.len ? `<span>${s.len}</span>` : ''}${s.from ? `<span>${s.pct}%</span>` : ''}</span></div>
+  <div class="lcd__bar"><span><span><b>${pad(i + 1)}</b>/${pad(total)}</span></span><span>${tags(s)}${s.len ? `<span>${s.len}</span>` : ''}${s.kind === 'friend' ? `<span>${s.pct}%</span>` : ''}</span></div>
   <div class="lcd__meta"><p class="lcd__title">${esc(s.title)}</p><p class="lcd__by">${esc(s.by)}</p></div></div>`;
-const trackRow = (s, k, cur) => `<li><button class="trk${s.from ? ' is-wait' : ''}" type="button" data-pick="${esc(s.id)}"${cur ? ' aria-current="true"' : ''}>
+/** @param {SongPick} s @param {number} k @param {boolean} cur */
+const trackRow = (s, k, cur) => `<li><button class="trk${s.kind === 'friend' ? ' is-wait' : ''}" type="button" data-pick="${esc(s.id)}"${cur ? ' aria-current="true"' : ''}>
   <i class="led${cur ? ' on' : ''}"></i><span class="trk__n">${k + 1}</span>
-  <span class="trk__txt"><span class="trk__t">${esc(s.title)}</span><span class="trk__by">${esc(s.by)}${s.from ? ` · from ${esc(s.from)}` : ''}</span></span>
-  <span class="trk__r">${s.yours ? '<i class="tag">Yours</i>' : ''}${s.from ? `<i class="tag tag--o trk__from">From ${esc(s.from)}</i>` : ''}${s.from && s.pct > 0 ? `<span class="xfer"><span class="xfer__seg">${segs(s.pct)}</span>${s.pct}%</span>` : ''}${s.len ? `<span class="trk__len">${s.len}</span>` : ''}</span></button></li>`;
-
-// ---------- Slide switches ----------
-const slides = new Map();
-function initSlide(root, onChange) {
-  const radios = $$('input[type=radio]', root), track = root.querySelector('.slide__track');
-  const sync = () => root.style.setProperty('--i', Math.max(0, radios.findIndex((r) => r.checked)));
-  const pick = (x) => {
-    const r = track.getBoundingClientRect();
-    const i = clamp(Math.floor(((x - r.left) / r.width) * radios.length), 0, radios.length - 1);
-    if (radios[i].disabled || radios[i].checked) return;
-    radios[i].checked = true;
-    radios[i].dispatchEvent(new Event('change', { bubbles: true }));
-  };
-  radios.forEach((r) => r.addEventListener('change', () => { sync(); onChange(r.value); }));
-  track.addEventListener('pointerdown', (e) => {
-    if (radios.every((r) => r.disabled)) return;
-    track.setPointerCapture(e.pointerId);
-    root.classList.add('is-drag');
-    pick(e.clientX);
-    radios.find((r) => r.checked)?.focus({ preventScroll: true });
-  });
-  track.addEventListener('pointermove', (e) => { if (track.hasPointerCapture(e.pointerId)) pick(e.clientX); });
-  const end = () => root.classList.remove('is-drag');
-  track.addEventListener('pointerup', end);
-  track.addEventListener('pointercancel', end);
-  sync();
-  slides.set(root, { sync, radios });
-}
-const setRadio = (root, value) => { const api = slides.get(root); api.radios.forEach((r) => { r.checked = r.value === String(value); }); api.sync(); };
-
-// ---------- Rotary encoder with detents ----------
-// The detents share at most 300 degrees, so a long list still fits; with many songs only every few ticks is numbered.
-function makeEncoder(el, { count, get, set, onEnter }) {
-  const stepOf = () => Math.min(30, 300 / Math.max(1, count() - 1));
-  const knob = el.querySelector('.enc__knob'), seat = el.querySelector('.enc__seat'), ticks = el.querySelector('.enc__ticks');
-  let acc = 0, last = 0, drag = false, wheel = 0, wheelAt = 0;
-  const angle = (e) => { const r = el.getBoundingClientRect(); return Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2)) * 180 / Math.PI; };
-  const render = (tension = 0) => {
-    const n = count(), i = get();
-    knob.style.setProperty('--a', `${(i - (n - 1) / 2) * stepOf() + tension}deg`);
-    el.setAttribute('aria-valuemax', n);
-    el.setAttribute('aria-valuenow', i + 1);
-  };
-  const drawTicks = () => {
-    const n = count(), every = Math.ceil(n / 12);
-    let s = '';
-    for (let i = 0; i < n; i++) {
-      const a = ((i - (n - 1) / 2) * stepOf()) * Math.PI / 180, sin = Math.sin(a), cos = Math.cos(a);
-      s += `<line x1="${100 + 84 * sin}" y1="${100 - 84 * cos}" x2="${100 + 91 * sin}" y2="${100 - 91 * cos}"/>`;
-      if (i % every === 0 || i === n - 1) s += `<text x="${100 + 99 * sin}" y="${100 - 99 * cos}" data-i="${i}">${i + 1}</text>`;
-    }
-    ticks.innerHTML = s;
-  };
-  const go = (i) => {
-    const n = count(), cur = get(), next = clamp(i, 0, n - 1);
-    if (next === cur) return false;
-    set(next, Math.sign(next - cur));
-    if (!reduced.matches) { seat.classList.remove('seat'); void seat.offsetWidth; seat.classList.add('seat'); }
-    return true;
-  };
-  const step = (d) => { go(get() + d); render(); };
-  el.addEventListener('pointerdown', (e) => { drag = true; el.setPointerCapture(e.pointerId); last = angle(e); acc = 0; el.classList.add('is-drag'); el.focus({ preventScroll: true }); });
-  el.addEventListener('pointermove', (e) => {
-    if (!drag) return;
-    const a = angle(e);
-    let d = a - last;
-    if (d > 180) d -= 360;
-    if (d < -180) d += 360;
-    last = a;
-    acc += d;
-    const detent = stepOf();
-    while (acc > detent * 0.6) { if (go(get() + 1)) acc -= detent; else { acc = Math.min(acc, 10); break; } }
-    while (acc < -detent * 0.6) { if (go(get() - 1)) acc += detent; else { acc = Math.max(acc, -10); break; } }
-    render(clamp(acc, -10, 10) * 0.55);
-  });
-  const end = () => { if (!drag) return; drag = false; acc = 0; el.classList.remove('is-drag'); render(); };
-  el.addEventListener('pointerup', end);
-  el.addEventListener('pointercancel', end);
-  el.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    if (e.timeStamp - wheelAt > 300) wheel = 0;
-    wheelAt = e.timeStamp;
-    wheel += (Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX) * (e.deltaMode === 1 ? 16 : 1);
-    if (Math.abs(wheel) >= 24) { step(wheel > 0 ? 1 : -1); wheel = 0; }
-  }, { passive: false });
-  el.addEventListener('keydown', (e) => {
-    const k = e.key;
-    if (k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft') { e.preventDefault(); step(k === 'ArrowRight' || k === 'ArrowDown' ? 1 : -1); }
-    else if (k === 'Home' || k === 'End') { e.preventDefault(); go(k === 'Home' ? 0 : count() - 1); render(); }
-    else if (k === 'Enter') { e.preventDefault(); onEnter(); }
-  });
-  return { render, step, refresh() { drawTicks(); render(); } };
-}
+  <span class="trk__txt"><span class="trk__t">${esc(s.title)}</span><span class="trk__by">${esc(s.by)}${s.kind === 'friend' ? ` · from ${esc(s.from)}` : ''}</span></span>
+  <span class="trk__r">${s.kind === 'here' ? tags(s) : `<i class="tag tag--o trk__from">From ${esc(s.from)}</i>`}${s.kind === 'friend' && s.pct > 0 ? `<span class="xfer"><span class="xfer__seg">${segs(s.pct)}</span>${s.pct}%</span>` : ''}${s.len ? `<span class="trk__len">${s.len}</span>` : ''}</span></button></li>`;
+/** @param {SongPick[]} list */
+const listKey = (list) => list.map((s) => `${s.id}:${s.kind === 'friend' ? s.pct : ''}:${s.by}:${s.len}`).join('|');
 
 // ---------- Screens ----------
+/** @type {Record<string, string>} */
 const STEP_OF = { singers: 'singers', song: 'song', upload: 'song', 'upload-progress': 'song', outdated: 'song', settings: 'settings' };
+/** @type {Record<string, () => void>} */
 const enter = {
-  title() { const g = device.querySelector('.arm__g'); g.classList.remove('swing'); void g.getBBox(); g.classList.add('swing'); },
-  singers() { renderSingers(); connectMonitors(); },
+  title() { const g = /** @type {SVGGraphicsElement} */ (device.querySelector('.arm__g')); g.classList.remove('swing'); void g.getBBox(); g.classList.add('swing'); },
+  singers() { renderSingers(); startMonitor(); },
   song() { renderSongList(); },
-  settings() { renderSettings(); if (settings.lyrics) ensureChecker(); },
-  guest() { renderGuest(); connectMonitors(); },
+  settings() { renderSettings(); if (settings.lyrics) ensureChecker(languageOf(selectedSong())); },
+  guest() { renderGuest(false); startMonitor(); },
   game() {},
   pause() { renderPause(); },
   upload() { renderUpload(); },
@@ -284,6 +248,7 @@ const enter = {
   outdated() {},
   results() {},
 };
+/** @param {string} name */
 function go(name) {
   const prev = screen;
   screen = name;
@@ -293,42 +258,52 @@ function go(name) {
     const cur = b.dataset.step === STEP_OF[name];
     b.classList.toggle('is-cur', cur);
     if (cur) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
-    b.querySelector('.led').classList.toggle('on', cur);
+    b.querySelector('.led')?.classList.toggle('on', cur);
   });
-  if (!['singers', 'guest'].includes(name)) stopMonitors();
+  if (name !== 'singers' && name !== 'guest') stopMonitor();
+  // Leaving the progress screen any way at all cancels the upload.
+  if (prev === 'upload-progress' && name !== 'upload-progress') importRun?.abort();
   enter[name]();
-  if (prev && prev !== name) device.querySelector('.screen.is-on').focus({ preventScroll: true });
+  if (prev && prev !== name) /** @type {HTMLElement | null} */ (device.querySelector('.screen.is-on'))?.focus({ preventScroll: true });
   window.__gv.screen = name;
 }
+/** @type {Record<string, string>} */
 const BACK = { singers: 'title', song: 'singers', settings: 'song', upload: 'song', outdated: 'song' };
 function back() {
   if (screen === 'guest') return leaveRoom();
   if (screen === 'game') return pause();
   if (screen === 'pause') return resume();
-  if (screen === 'upload-progress') { importAbort?.abort(); return go('upload'); }
+  if (screen === 'upload-progress') return go(upload.replace ? 'song' : 'upload');
   if (BACK[screen]) go(BACK[screen]);
 }
 
 // ---------- Singers: one channel rack for people on this device and friends online ----------
-// Without a room the channels are this device's singers. In a room they are the room's people in the order they
-// joined, which is also the order lines go round when taking turns; this device's seats are its singers.
+/** @typedef {{ key: string, name: string, c: number, local: number | null, member: Member | null, host: boolean }} Channel */
+// In a room, this device's singers are the first room.seats.length players, seat i being player i.
+const localPlayers = () => (room ? settings.players.slice(0, room.seats.length) : settings.players);
+const roomMode = () => room?.view?.room.mode || settings.mode;
+/** Without a room the channels are this device's singers. In a room they are the room's people in the order they
+ * joined, which is also the order lines go round when taking turns. @returns {Channel[]} */
 function channels() {
   const v = room?.view;
-  if (!v) return settings.players.map((p, i) => ({ key: `l${i}`, local: i, name: p.name, c: i }));
+  if (!room || !v) return settings.players.map((p, i) => ({ key: `l${i}`, local: i, name: p.name, c: i, member: null, host: false }));
+  const seats = room.seats.map((s) => s.id);
   return v.members.filter((m) => m.here).map((m) => {
-    const local = settings.players.findIndex((p) => p.seat === m.id);
-    return { key: m.id, member: m, local: local < 0 ? null : local, name: local < 0 ? m.name : settings.players[local].name, c: m.color, host: m.id === v.room.host };
+    const i = seats.indexOf(m.id);
+    const local = i >= 0 && i < settings.players.length ? i : null;
+    return { key: m.id, member: m, local, name: local == null ? m.name : settings.players[local].name, c: m.color, host: m.id === v.room.host };
   });
 }
-const localPlayers = () => (room?.view ? settings.players.filter((p) => p.seat) : settings.players);
-const roomMode = () => room?.view?.room.mode || settings.mode;
 
+/** @param {Channel[]} list */
 const rackKey = (list) => list.map((s) => `${s.key}:${s.local == null ? s.name : ''}`).join('|');
+let rack = { key: '', ids: /** @type {string[]} */ ([]) };
+/** @param {Set<string>} [fresh] channels that just arrived (animated in) */
 function renderSingers(fresh) {
   const list = channels(), rows = [];
-  renderSingers.ids = list.map((s) => s.key);
-  const canRemove = (s) => s.local != null && localPlayers().length > 1;
-  list.forEach((s, i) => {
+  // In a room the first singer here holds the device's main seat and leaves only with the room.
+  const canRemove = (/** @type {Channel} */ s) => s.local != null && localPlayers().length > 1 && !(room && s.local === 0);
+  for (const [i, s] of list.entries()) {
     const online = s.local == null;
     const name = online
       ? `<span class="namebox"><span class="namebox__name">${esc(s.name)}</span><span class="namebox__on">${G.on}On their phone</span></span>`
@@ -338,140 +313,127 @@ function renderSingers(fresh) {
     <span class="ch__no">${pad(i + 1)}</span><i class="ch__sw"></i>${name}
     <span class="meter meter--fill" data-meter="${esc(s.key)}" aria-hidden="true"></span>
     ${online ? '<span></span>' : `<button class="key key--round" type="button" data-remove="${s.local}" aria-label="Remove ${esc(s.name)}"${canRemove(s) ? '' : ' disabled'}><span class="top">${G.minus}</span></button>`}</li>`);
-  });
+  }
   if (list.length < MAX_SINGERS) rows.push(`<li class="ch ch--add"><span class="ch__no">${pad(list.length + 1)}</span><span></span>
     <span class="addwrap"><button class="key key--round" type="button" data-add aria-label="Add singer"><span class="top">${G.plus}</span></button><span class="silk">Add singer</span></span></li>`);
   for (let i = list.length + 1; i < MAX_SINGERS; i++) rows.push(`<li class="ch ch--empty" aria-hidden="true"><span class="ch__no">${pad(i + 1)}</span></li>`);
   $('singer-rows').innerHTML = rows.join('');
-  renderSingers.keys = rackKey(list);
+  rack = { key: rackKey(list), ids: list.map((s) => s.key) };
   fitMeters();
   syncMode();
 }
-// Together needs one mic per singer on this device (2 at most); friends online bring their own phone.
+/** A filling meter gets as many LEDs as fit its column. */
+function fitMeters() { for (const m of $$('.screen.is-on .meter--fill')) m.innerHTML = '<i class="led"></i>'.repeat(phone.matches ? 10 : clamp(Math.floor((m.clientWidth - 15) / 14), 8, 28)); }
+addEventListener('resize', () => { if (screen === 'singers' || screen === 'guest') fitMeters(); });
+
+// Together means everyone at once, so each singer needs their own mic: one singer per device. Two or more singers
+// here take turns on this device's mic.
 function syncMode() {
   const n = channels().length, local = localPlayers().length, sw = $('mode');
-  const [together, turns] = slides.get(sw).radios;
+  const [together, turns] = mode.radios;
   const host = !room?.view || room.view.isHost;
-  together.disabled = n < 2 || local > MAX_MICS_HERE || !host;
+  together.disabled = n < 2 || local > 1 || !host;
   turns.disabled = n < 2 || !host;
-  if (local > MAX_MICS_HERE && roomMode() !== 'turns') setMode('turns');
+  if (host && local > 1 && roomMode() !== 'turns') setMode('turns');
   sw.classList.toggle('is-disabled', n < 2);
-  sw.classList.toggle('is-max', local > MAX_MICS_HERE);
-  setRadio(sw, roomMode());
+  sw.classList.toggle('is-max', local > 1);
+  mode.set(roomMode());
 }
+/** @param {Mode} v */
 function setMode(v) {
   settings.mode = v;
   saveSettings();
-  if (room?.view?.isHost) room.act('set', { mode: v }).catch((err) => toast(err.message));
+  if (room?.view?.isHost) room.act('set', { mode: v }).catch((err) => toast(message(err)));
 }
 async function addSinger() {
   if (channels().length >= MAX_SINGERS) return;
   let k = 1;
   while (settings.players.some((p) => p.name === `Player ${k}`)) k++;
-  const p = { name: `Player ${k}`, deviceId: '' };
-  settings.players.push(p);
+  const p = { name: `Player ${k}` };
+  // In a room the new singer gets the next seat; players after the seated ones (a guest's other saved singers) wait.
+  const at = room ? room.seats.length : settings.players.length;
+  settings.players.splice(at, 0, p);
   saveSettings();
-  if (room) p.seat = await room.addSeat(p.name).catch((err) => { toast(err.message); return undefined; });
-  renderSingers(new Set([p.seat || `l${settings.players.length - 1}`]));
-  connectMonitors();
-  ($('singer-rows').querySelector('[data-add]') || $('singer-rows').querySelector(`[data-singer="${settings.players.length - 1}"]`))?.focus({ preventScroll: true });
+  let key = `l${at}`;
+  if (room) {
+    try {
+      key = await room.addSeat(p.name);
+    } catch (err) {
+      settings.players.splice(at, 1);
+      saveSettings();
+      toast(message(err));
+    }
+  }
+  renderSingers(new Set([key]));
+  $('singer-rows').querySelector('button')?.focus({ preventScroll: true });
 }
+/** @param {number} i */
 function removeSinger(i) {
-  if (localPlayers().length < 2) return;
-  const [p] = settings.players.splice(i, 1);
-  if (p.seat) room?.removeSeat(p.seat);
+  if (localPlayers().length < 2 || i >= localPlayers().length || (room && i === 0)) return;
+  if (room) room.removeSeat(room.seats[i].id);
+  settings.players.splice(i, 1);
   saveSettings();
   renderSingers();
-  connectMonitors();
 }
 
 // The first copy makes the room: this device's singers each take a seat, and friends who open the link take the
 // next free channels.
+/** @param {HTMLElement} btn */
 async function copyInvite(btn) {
-  const top = btn.querySelector('.top');
+  const top = /** @type {HTMLElement} */ (btn.querySelector('.top'));
   try {
     if (!room) {
       await openRoom();
       renderSingers();
     }
-    const ok = await navigator.clipboard.writeText(inviteLink(room.main.code)).then(() => true, () => false);
-    top.innerHTML = ok ? '<i class="led led--mint on"></i><span>Copied</span>' : `<i class="led on"></i><span>${esc(inviteLink(room.main.code))}</span>`;
+    const link = inviteLink(/** @type {Room} */ (room).main.code);
+    const ok = await navigator.clipboard.writeText(link).then(() => true, () => false);
+    top.innerHTML = ok ? '<i class="led led--mint on"></i><span>Copied</span>' : `<i class="led on"></i><span>${esc(link)}</span>`;
   } catch (err) {
     top.innerHTML = '<i class="led on"></i><span>Couldn’t make a room</span>';
-    toast(err.message || String(err));
+    toast(message(err));
   }
   clearTimeout(copyInvite.timer);
   copyInvite.timer = setTimeout(() => { top.innerHTML = INVITE_LEGEND; }, 2400);
 }
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+copyInvite.timer = undefined;
 
 // ---------- Live mic LEDs ----------
-// This device's channels show its microphones; a friend's channel shows the level their phone sends with each poll.
+// This device's channels show its microphone; a friend's channel shows the level their phone sends with each poll.
+/** @type {Map<string, { peak: number, hold: number }>} */
 const peaks = new Map();
 let lastMeter = 0, lastLevelSent = 0;
-function micLevel(local) {
-  const m = monitors[roomMode() === 'turns' ? 0 : local];
-  return m ? m.level : 0;
-}
+/** @param {number} t */
 function meters(t) {
   requestAnimationFrame(meters);
   if (t - lastMeter < (reduced.matches ? 180 : 60)) return;
   lastMeter = t;
-  monitors.forEach((m) => m.drain());
+  monitor?.drain();
+  const level = monitor?.level ?? 0;
   const list = screen === 'singers' || screen === 'guest' ? channels() : [];
   for (const m of $$('.screen.is-on .meter[data-meter]')) {
-    const s = list.find((x) => x.key === m.dataset.meter);
+    const key = /** @type {string} */ (m.dataset.meter);
+    const s = list.find((x) => x.key === key);
     if (!s) continue;
-    const lvl = s.local != null ? micLevel(s.local) : clamp(+s.member.live?.level || 0, 0, 1);
+    const lvl = s.local != null ? level : clamp(+(s.member?.live.level ?? 0) || 0, 0, 1);
     const L = m.children, n = L.length;
-    let v = peaks.get(m.dataset.meter);
-    if (!v) peaks.set(m.dataset.meter, (v = { peak: 0, hold: 0 }));
+    let v = peaks.get(key);
+    if (!v) peaks.set(key, (v = { peak: 0, hold: 0 }));
     const lit = Math.round(clamp(lvl * 1.25, 0, 1) * n);
     if (lit >= v.peak) { v.peak = lit; v.hold = t + 650; } else if (t > v.hold) { v.peak = Math.max(lit, v.peak - 1); v.hold = t + 80; }
     for (let i = 0; i < n; i++) L[i].classList.toggle('on', i < lit || (v.peak > 1 && i === v.peak - 1));
   }
-  // Friends see this device's levels too, at the pace of the room's polls.
+  // Friends see this device's level too, at the pace of the room's polls.
   if (room && list.length && t - lastLevelSent > 300) {
     lastLevelSent = t;
-    for (const s of list) if (s.local != null && s.member) room.setLive({ level: Math.round(micLevel(s.local) * 20) / 20 }, s.member.id);
+    for (const s of list) if (s.local != null && s.member) room.setLive({ level: Math.round(level * 20) / 20 }, s.member.id);
   }
 }
 requestAnimationFrame(meters);
 
-async function connectMonitors() {
-  stopMonitors();
-  try {
-    await ensureEngine();
-    const mics = roomMode() === 'turns' ? 1 : Math.min(MAX_MICS_HERE, localPlayers().length);
-    for (let i = 0; i < mics; i++) {
-      const m = new VoiceInput(engine, { stream: await getStream(i) });
-      await m.connect();
-      monitors.push(m);
-    }
-  } catch (err) {
-    stopMonitors();
-    micError(err);
-  }
-}
-function stopMonitors() {
-  monitors.splice(0).forEach((m) => m.disconnect());
-}
-async function getStream(i) {
-  const want = settings.players[i]?.deviceId || '';
-  const have = streams[i];
-  if (have && have.deviceId === want && have.speakers === settings.speakers && have.stream.active) return have.stream;
-  have?.stream.getTracks().forEach((t) => t.stop());
-  const stream = await openMic(want, settings.speakers);
-  streams[i] = { deviceId: want, speakers: settings.speakers, stream };
-  return stream;
-}
-function micError(err) {
-  if (err?.name === 'NotAllowedError') toast('Microphone blocked. Allow it in the address bar, then reload.');
-  else if (err?.name === 'NotFoundError' || err?.name === 'OverconstrainedError') toast('No microphone found. Plug one in and try again.');
-  else toast(`Microphone error: ${err?.message || err}`);
-}
-
 // ---------- Song ----------
-let encSong;
+let songListKey = '';
 function renderSongList() {
   const list = catalog(), sel = selIndex(list);
   $('tracks-song').innerHTML = list.map((s, k) => trackRow(s, k, k === sel)).join('');
@@ -479,28 +441,31 @@ function renderSongList() {
   markTracks(sel);
   setLcd($('lcd-song'), lcdSong(list[sel], sel, list.length));
   $('enc-song').setAttribute('aria-valuetext', list[sel].title);
-  renderSongList.key = list.map((s) => `${s.id}:${s.pct ?? ''}:${s.by}:${s.len}`).join('|');
+  songListKey = listKey(list);
 }
+/** @param {number} sel */
 function markTracks(sel) {
   $$('.trk', $('tracks-song')).forEach((b, k) => {
     const cur = k === sel;
     if (cur) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
-    b.querySelector('.led').classList.toggle('on', cur);
+    b.querySelector('.led')?.classList.toggle('on', cur);
   });
-  $$('.enc__ticks text', $('enc-song')).forEach((t) => t.classList.toggle('cur', +t.dataset.i === sel));
+  $$('.enc__ticks text', $('enc-song')).forEach((t) => t.classList.toggle('cur', Number(t.dataset.i) === sel));
   // The picked song's row stays in view in a long list (only the list scrolls, never the page).
-  const list = $('tracks-song'), row = list.children[sel];
+  const list = $('tracks-song'), row = /** @type {HTMLElement | undefined} */ (list.children[sel]);
   if (row && list.scrollHeight > list.clientHeight) {
     const top = row.offsetTop - list.offsetTop, bottom = top + row.offsetHeight;
     if (top < list.scrollTop) list.scrollTop = top;
     else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
   }
 }
+/** @param {number} i @param {number} dir */
 function selectSong(i, dir) {
   const list = catalog(), s = list[i];
+  if (!s || (room?.view && !room.view.isHost)) return;
   settings.songId = s.id;
   saveSettings();
-  if (room?.view?.isHost) room.act('set', { song: s.id }).catch((err) => toast(err.message));
+  if (room?.view?.isHost) room.act('set', { song: s.id }).catch((err) => toast(message(err)));
   markTracks(i);
   setLcd($('lcd-song'), lcdSong(s, i, list.length), dir);
   $('enc-song').setAttribute('aria-valuetext', s.title);
@@ -509,31 +474,32 @@ function selectSong(i, dir) {
 let outdatedOk = false;
 function toSettings() {
   const s = selectedSong();
-  if (haveSong(selectedId()) && isOutdated(s) && !outdatedOk) return askRemake(s);
+  if (s && isOutdated(s) && !outdatedOk) return askRemake(s);
   outdatedOk = false;
   go('settings');
 }
 
 // ---------- Settings ----------
 function renderSettings() {
-  const list = catalog(), i = selIndex(list), s = list[i];
-  setLcd($('lcd-set'), lcdSong(s, i, list.length));
-  setRadio($('sw-diff'), DIFFS.indexOf(settings.difficulty));
-  setRadio($('sw-out'), settings.speakers ? 1 : 0);
-  setRadio($('sw-vocal'), GUIDES.indexOf(settings.guide));
+  const list = catalog(), i = selIndex(list);
+  setLcd($('lcd-set'), lcdSong(list[i], i, list.length));
+  diff.set(String(DIFFS.indexOf(settings.difficulty)));
+  out.set(settings.speakers ? '1' : '0');
+  vocal.set(String(GUIDES.indexOf(settings.guide)));
   syncWords();
   syncSing();
 }
+let starting = false; // a room start on its way to the server
 // Sing waits for a friend's song to arrive on every device in the room.
 function syncSing() {
   const v = room?.view, list = catalog(), s = list[selIndex(list)];
   let note = '';
-  if (s.from) note = `${s.title} arriving · ${s.pct}%`;
-  else if (v && remoteHere() && v.room.song) {
-    const { missing } = songHolders(v, v.room.song);
+  if (s.kind === 'friend') note = `${s.title} arriving · ${s.pct}%`;
+  else if (v && remoteHere()) {
+    const { missing } = songHolders(v, s.id);
     if (missing.length) note = `Sending ${s.title} · ${missing.map((m) => m.name).join(', ')}`;
   }
-  $('sing').disabled = !!note || (v && !v.isHost);
+  /** @type {HTMLButtonElement} */ ($('sing')).disabled = !!note || starting || (!!v && !v.isHost);
   $('sing-note').textContent = note;
 }
 function syncWords() {
@@ -548,140 +514,152 @@ function syncWords() {
 // picks the song and starts it on every device at the same moment, and scores travel through the room service.
 // Songs people uploaded are listed for the whole room; a picked one goes from someone who has it to everyone who
 // doesn't, and stays in their library afterwards.
-let roomPlayed = 0;
-const transfers = new Map(); // song id -> { dir: 'send' | 'get', p?, from?, error? } for transfers this device runs
-const myLibrary = () => SONGS.filter((s) => s.user).map((s) => ({ id: s.id, title: s.title, artist: s.artist, duration: s.chartData.duration, language: s.chartData.language, accents: [s.accent, s.accent2] }));
-const sendLibrary = () => room?.send({ library: myLibrary() });
-const remoteHere = () => room?.view?.members.some((m) => m.here && !room.view.mine.includes(m.id));
+let roomPlayed = 0; // the last round this device played or sat out
+/** @type {Map<string, { dir: 'send' } | { dir: 'get', p: number }>} transfers this device is running */
+const transfers = new Map();
+// Newest first: the room service keeps the first 60.
+const myLibrary = () => SONGS.flatMap((s) => (s.kind === 'upload' ? [{ id: s.id, title: s.title, artist: s.artist, duration: s.chart.duration, language: s.chart.language || '', accents: s.accents }] : [])).reverse();
+const sendLibrary = () => { if (room) for (const seat of room.seats) room.send({ library: myLibrary() }, seat.id); };
+const remoteHere = () => !!room?.view?.members.some((m) => m.here && !room?.view?.mine.includes(m.id));
 
-// Who in the room has the picked song, and who still needs it. This device's seats all have what it has.
+/** Who in the room has the picked song, and who still needs it. This device's seats all have what it has.
+ * @param {RoomView} view @param {string} id */
 function songHolders(view, id) {
   const here = view.members.filter((m) => m.here);
-  const has = (m) => (view.mine.includes(m.id) ? haveSong(id) : builtIn(id) || m.library.some((e) => e.id === id));
+  const has = (/** @type {Member} */ m) => (view.mine.includes(m.id) ? haveSong(id) : builtIn(id) || m.library.some((e) => e.id === id));
   return { holders: here.filter(has), missing: here.filter((m) => !has(m)) };
 }
 
-// The first person here who has the picked song sends it once; everyone without it fetches it when it's sent.
+/** The first person here who has the picked song sends it once; everyone without it fetches it once it's sent.
+ * @param {RoomView} view */
 function runTransfers(view) {
   const id = view.room.song;
-  if (!id || builtIn(id) || transfers.has(id)) return;
+  if (!room || !id || builtIn(id) || transfers.has(id)) return;
   const { holders, missing } = songHolders(view, id);
-  if (!missing.length || !holders.length) return;
+  if (!missing.length) return;
   if (haveSong(id)) {
-    if (view.mine.includes(holders[0].id) && !room.live.sent?.[id]) sendSong(id);
+    if (holders.length && view.mine.includes(holders[0].id) && !room.main.live.sent?.[id]) sendSong(room, id);
   } else {
-    const sender = holders.find((m) => m.live?.sent?.[id]);
-    if (sender) getSong(id, sender);
+    const sender = view.members.find((m) => m.here && m.live.sent?.[id]);
+    if (sender) getSong(room, id, sender);
   }
 }
-async function sendSong(id) {
-  const t = { dir: 'send' };
-  transfers.set(id, t);
-  const xfer = (p) => room?.setLive({ xfer: { id, dir: 'send', p: Math.round(p * 100) / 100 } });
+/** A failed transfer is tried again a little later. @param {string} id */
+const retryLater = (id) => setTimeout(() => transfers.delete(id), 10000);
+/** @param {Room} r @param {string} id */
+async function sendSong(r, id) {
+  transfers.set(id, { dir: 'send' });
   try {
-    xfer(0);
-    const blob = await packSong(await getUserSong(id), (p) => xfer(p * 0.4));
-    await room.upload(id, blob, (p) => xfer(0.4 + p * 0.6));
-    room?.setLive({ sent: { ...room.live.sent, [id]: blob.size }, xfer: null });
+    const rec = await getUserSong(id);
+    if (!rec) throw new Error('It is no longer on this device.');
+    const blob = await packSong(rec, () => {});
+    await r.upload(id, blob, () => {});
+    r.setLive({ sent: { ...r.main.live.sent, [id]: blob.size } });
     transfers.delete(id);
   } catch (err) {
-    t.error = err.message || String(err);
-    room?.setLive({ xfer: null });
-    toast(`Sending the song failed: ${t.error}`);
+    toast(`Sending the song failed: ${message(err)}`);
+    retryLater(id);
   }
 }
-async function getSong(id, sender) {
-  const t = { dir: 'get', from: sender.name, p: 0 };
+/** @param {Room} r @param {string} id @param {Member} sender */
+async function getSong(r, id, sender) {
+  const t = { dir: /** @type {const} */ ('get'), p: 0 };
   transfers.set(id, t);
-  const xfer = (p) => {
-    t.p = p;
-    room?.setLive({ xfer: { id, dir: 'get', p: Math.round(p * 100) / 100 } });
-    refreshRoomScreens();
-  };
   try {
-    xfer(0);
-    const rec = await unpackSong(await room.download(id, sender.live.sent[id], xfer), sender.name, id);
+    const blob = await r.download(id, sender.live.sent?.[id] ?? 1, (p) => { t.p = p; refreshRoomScreens(); });
+    const rec = await unpackSong(blob, sender.name, id);
     await saveUserSong(rec);
-    SONGS.push(userSong(rec));
+    if (!haveSong(id)) SONGS.push(userSong(rec));
     sendLibrary();
-    room?.setLive({ xfer: null });
     transfers.delete(id);
   } catch (err) {
-    t.error = err.message || String(err);
-    room?.setLive({ xfer: null });
-    toast(`“${sender.name}”’s song didn’t arrive: ${t.error}`);
+    if (r !== room) return;
+    toast(`${sender.name}’s song didn’t arrive: ${message(err)}`);
+    retryLater(id);
   }
   refreshRoomScreens();
 }
 
-// Makes a room from this device's singers: the first singer's seat is the host, the others join after.
+/** Makes a room from this device's singers: the first singer's seat is the host, the others join after. */
 async function openRoom() {
   await loadUserSongs();
-  room = new Room(onRoomUpdate);
+  const r = new Room(onRoomUpdate, leaveRoom);
+  room = r;
   roomPlayed = 0;
-  const [first, ...rest] = settings.players;
-  const code = await room.enter(null, first.name);
-  first.seat = room.main.id;
-  for (const p of rest) p.seat = await room.addSeat(p.name);
-  sendLibrary();
-  await room.act('set', { song: settings.songId, mode: settings.mode, difficulty: settings.difficulty });
-  history.replaceState(null, '', `#room=${code}`);
-  window.__gv.room = code;
+  transfers.clear();
+  try {
+    const [first, ...rest] = settings.players;
+    const code = await r.enter(null, first.name);
+    for (const p of rest) await r.addSeat(p.name);
+    sendLibrary();
+    await r.act('set', { song: selectedId(), mode: settings.mode, difficulty: settings.difficulty });
+    history.replaceState(null, '', `#room=${code}`);
+    window.__gv.room = code;
+  } catch (err) {
+    r.leave();
+    room = null;
+    throw err;
+  }
 }
 
-// A friend's phone, after opening the link: one seat, then its own screen until the host starts.
+/** A friend's phone, after opening the link: one seat, then its own screen until the host starts. @param {string} code */
 async function joinRoom(code) {
   await ensureEngine();
   await loadUserSongs();
-  room = new Room(onRoomUpdate);
+  const r = new Room(onRoomUpdate, leaveRoom);
+  room = r;
   roomPlayed = 0;
+  transfers.clear();
   try {
-    const joined = await room.enter(code, settings.players[0].name);
     // Seats kept from earlier in this tab come back with the singers they belonged to (a host who reloaded).
-    settings.players.forEach((p, i) => { if (room.seats[i]) p.seat = room.seats[i].id; else delete p.seat; });
+    const joined = await r.enter(code, settings.players[0].name);
     sendLibrary();
     history.replaceState(null, '', `#room=${joined}`);
     window.__gv.room = joined;
+    const v = /** @type {RoomView} */ (r.view);
     // Don't drop into a song that has been playing for a while; wait for the next one.
-    const r = room.view.room;
-    if (r.startAt && room.serverNow() - r.startAt > 15000) roomPlayed = r.round;
-    go(room.view.isHost ? 'singers' : 'guest');
+    if (v.room.startAt && r.serverNow() - v.room.startAt > ROOM_LATE_MS) roomPlayed = v.room.round;
+    go(v.isHost ? 'singers' : 'guest');
   } catch (err) {
-    toast(err.message || String(err));
-    leaveRoom();
+    leaveRoom(message(err));
   }
 }
 const isGuest = () => !!room?.view && !room.view.isHost;
 
-function leaveRoom() {
+/** @param {string} [why] shown when the room closed under this device */
+function leaveRoom(why) {
+  if (game?.start.kind === 'room') stopGame();
   room?.leave();
   room = null;
-  settings.players.forEach((p) => delete p.seat);
+  transfers.clear();
   history.replaceState(null, '', location.pathname + location.search);
+  window.__gv.room = null;
+  if (why) toast(why);
   go('title');
 }
 
+/** @param {RoomView} view */
 function onRoomUpdate(view) {
-  if (!view) return;
   const r = view.room;
+  if (!room) return;
   // The host started a new song: play it (also from the results of the last one).
-  if (r.round > roomPlayed && r.startAt && room.serverNow() - r.startAt < 15000 && !(game && !game.ended)) {
+  if (r.round > roomPlayed && r.startAt && room.serverNow() - r.startAt < ROOM_LATE_MS && !game) {
     roomPlayed = r.round;
-    // Someone who arrived without the song sits this one out and gets it for the next.
-    if (!haveSong(r.song)) return refreshRoomScreens();
-    const members = r.roster.map((id) => view.members.find((m) => m.id === id)).filter(Boolean);
-    startGame({ mode: 'room', song: r.song, turns: r.mode === 'turns', difficulty: r.difficulty, members, mine: view.mine, round: r.round, startAt: r.startAt, singer: roomSinger });
+    const roster = r.roster.flatMap((id) => view.members.filter((m) => m.id === id));
+    // A device that doesn't have the song yet sits this one out (and tells the others) and gets it for the next.
+    if (!haveSong(r.song)) {
+      for (const seat of room.seats) if (r.roster.includes(seat.id)) room.send({ result: { round: r.round, left: true } }, seat.id);
+      refreshRoomScreens();
+      return;
+    }
+    startGame({ kind: 'room', song: r.song, turns: r.mode === 'turns', difficulty: r.difficulty, roster, mine: view.mine, round: r.round, startAt: r.startAt });
     return;
   }
-  if (game && !game.ended && game.inRoom) {
-    for (const p of game.players) {
-      if (p.perf) continue;
-      const live = view.members.find((m) => m.id === p.member)?.live;
-      if (live?.round === game.round) p.remote = live;
-    }
-  }
-  if (screen === 'results' && lastResults?.g.inRoom) printResults(lastResults.g, lastResults.results, false);
-  if (!(game && !game.ended)) runTransfers(view);
+  // The host's role moved (the host went quiet for a while): the screens follow it.
+  if (screen === 'guest' && view.isHost) go('singers');
+  else if (!view.isHost && ['singers', 'song', 'settings', 'outdated'].includes(screen)) go('guest');
+  if (screen === 'results' && lastResults?.g.start.kind === 'room') printResults(lastResults.g, lastResults.mine, false);
+  if (!game) runTransfers(view);
   refreshRoomScreens();
 }
 
@@ -689,58 +667,55 @@ function onRoomUpdate(view) {
 function refreshRoomScreens() {
   if (screen === 'singers') {
     const list = channels();
-    if (rackKey(list) !== renderSingers.keys) {
-      const was = new Set(renderSingers.ids);
+    if (rackKey(list) !== rack.key) {
+      const was = new Set(rack.ids);
       renderSingers(new Set(list.map((s) => s.key).filter((k) => !was.has(k))));
     } else syncMode();
   } else if (screen === 'song') {
-    const list = catalog();
-    if (list.map((s) => `${s.id}:${s.pct ?? ''}:${s.by}:${s.len}`).join('|') !== renderSongList.key) renderSongList();
+    if (listKey(catalog()) !== songListKey) renderSongList();
   } else if (screen === 'settings') syncSing();
   else if (screen === 'guest') renderGuest(true);
 }
 
 // ---------- Guest: a friend's phone shows the room and waits for the host ----------
+let guestKeys = { rack: '', lcd: '' };
+/** @param {boolean} update */
 function renderGuest(update) {
   const v = room?.view;
   if (!v) return;
-  const host = v.members.find((m) => m.id === v.room.host);
-  const hostName = host?.name || 'The host';
+  const hostName = v.members.find((m) => m.id === v.room.host)?.name || 'The host';
   $('h-guest').textContent = `${hostName}’s room`;
   const list = channels();
-  const keys = list.map((s) => `${s.key}:${s.name}:${s.host}`).join('|');
-  if (!update || keys !== renderGuest.keys) {
-    renderGuest.keys = keys;
+  const rackNow = list.map((s) => `${s.key}:${s.name}:${s.host}`).join('|');
+  if ((!update || rackNow !== guestKeys.rack) && !$('guest-row').contains(document.activeElement)) {
+    guestKeys.rack = rackNow;
     const rows = list.map((s, i) => {
-      const me = s.local != null;
-      const name = me
+      const name = s.local != null
         ? `<label class="namebox"><input class="namebox__name" type="text" value="${esc(s.name)}" maxlength="18" spellcheck="false" autocomplete="off" data-singer="${s.local}" aria-label="Your name"><span class="namebox__on">You</span></label>`
         : `<span class="namebox"><span class="namebox__name">${esc(s.name)}</span>${s.host ? '<span class="namebox__on">Host</span>' : ''}</span>`;
       return `<li class="ch" style="--c:${color(s.c)}"><span class="ch__no">${pad(i + 1)}</span><i class="ch__sw"></i>${name}
         <span class="meter meter--fill" data-meter="${esc(s.key)}" aria-hidden="true"></span></li>`;
     });
     for (let i = list.length + 1; i <= MAX_SINGERS; i++) rows.push(`<li class="ch ch--empty" aria-hidden="true"><span class="ch__no">${pad(i)}</span></li>`);
-    if (!$('guest-row').contains(document.activeElement)) {
-      $('guest-row').innerHTML = rows.join('');
-      fitMeters();
-    }
+    $('guest-row').innerHTML = rows.join('');
+    fitMeters();
   }
-  const picked = v.room.song && catalog().find((s) => s.id === v.room.song);
-  const lcdKey = picked ? `${picked.id}:${picked.pct ?? ''}` : 'none';
-  if (lcdKey !== renderGuest.lcd) {
-    renderGuest.lcd = lcdKey;
+  const picked = v.room.song ? catalog().find((s) => s.id === v.room.song) : undefined;
+  const lcdNow = picked ? `${picked.id}:${picked.kind === 'friend' ? picked.pct : ''}:${hostName}` : `none:${hostName}`;
+  if (!update || lcdNow !== guestKeys.lcd) {
+    guestKeys.lcd = lcdNow;
     setLcd($('lcd-guest'), picked
       ? `<div class="lcd__in"><img class="lcd__cover" src="${picked.cover}" alt="">
-        <div class="lcd__bar"><span><b>${esc(hostName)} picked</b></span><span>${picked.len || ''}</span></div>
+        <div class="lcd__bar"><span><b>${esc(hostName)} picked</b></span><span>${picked.len}</span></div>
         <div class="lcd__meta"><p class="lcd__title">${esc(picked.title)}</p><p class="lcd__by">${esc(picked.by)}</p></div></div>`
       : `<div class="lcd__in lcd__in--msg"><div class="lcd__bar"><span>Song</span></div><p class="lcd__title">${esc(hostName)} is picking a song</p></div>`, update ? 1 : 0);
   }
-  $$('.g-ind').forEach((el) => { const on = !!picked && el.dataset.mode === v.room.mode; el.classList.toggle('is-on', on); el.querySelector('.led').classList.toggle('on', on); });
+  $$('.g-ind').forEach((el) => { const on = !!picked && el.dataset.mode === v.room.mode; el.classList.toggle('is-on', on); el.querySelector('.led')?.classList.toggle('on', on); });
   // A song on its way to this phone.
   const t = picked && transfers.get(picked.id);
-  $('guest-send').hidden = !t;
-  if (t) {
-    const pct = Math.round((t.p || 0) * 100);
+  $('guest-send').hidden = t?.dir !== 'get';
+  if (picked && t?.dir === 'get') {
+    const pct = Math.round(t.p * 100);
     $('guest-send-l').textContent = `Getting ${picked.title}`;
     $('guest-xfer').innerHTML = `<span class="xfer__seg">${segs(pct)}</span>${pct}%`;
   }
@@ -748,93 +723,130 @@ function renderGuest(update) {
 }
 
 // ---------- Game ----------
-async function startGame(opts) {
-  lastGameOpts = opts;
-  stopMonitors();
-  const song = opts.mode === 'room' ? SONGS.find((s) => s.id === opts.song) : selectedSong();
+/** A singer in a game: someone on this device (scored here) or a friend singing on their own device.
+ * @typedef {{ kind: 'here', name: string, color: string, member: string | null, perf: Performance, shown: number }} HereSinger
+ * @typedef {{ kind: 'online', name: string, color: string, member: string, shown: number }} OnlineSinger
+ * @typedef {HereSinger | OnlineSinger} Singer */
+/** @typedef {{
+ *   start: Start, state: 'starting' | 'playing' | 'ended', song: Song, chart: Chart, inst: AudioBuffer, vocals: AudioBuffer, guide: number,
+ *   singers: Singer[], here: HereSinger[], input: VoiceInput | null, voice: { id: string, color: string, frames: Frame[] },
+ *   turns: boolean, owners: (number | null)[], difficulty: Difficulty, lyricsOn: boolean, round: number | null,
+ *   shownAt: { disp: number | null, t: number }, pendingChecks: number, ui: string, counted: Set<number>, sentAt: number
+ * }} Game */
+
+/** Starts a song: on this device (local), on every device in the room at once (room), or with a recording singing
+ * (test). Any game already running ends first. @param {Start} start */
+async function startGame(start) {
+  stopGame();
+  stopMonitor();
+  const song = start.kind === 'local' ? selectedSong() : SONGS.find((s) => s.id === start.song);
+  if (!song) return toast('That song isn’t on this device.');
   go('game');
   $('pt-title').textContent = song.title;
   $('pt-time').textContent = '';
   $('ly-now').innerHTML = '';
   $('ly-next').textContent = '';
+  delete $('hw-call').dataset.k;
   call('Loading', null);
   $('chans').innerHTML = '';
+  /** @type {VoiceInput | null} */
+  let input = null;
+  // Every await below can come back to a different game (quit, restart, leaving the room): this one then stops.
+  const token = {};
+  startGame.token = token;
+  const stale = () => startGame.token !== token;
   try {
-    await ensureEngine();
-    const [chart, inst, vocals] = await Promise.all([loadChart(song), engine.load(song.inst), engine.load(song.vocals)]);
-    const difficulty = opts.difficulty || settings.difficulty;
-    const inRoom = opts.mode === 'room';
-    // Who sings: the room's people (this device's seats sing here), this device's singers, or one recorded
-    // singer for the demo and tests.
-    const local = settings.players.slice(0, settings.mode === 'together' ? MAX_MICS_HERE : MAX_SINGERS);
-    const turnsMode = inRoom ? opts.turns : opts.mode === 'mic' ? settings.mode === 'turns' : !!opts.players;
-    const cast = inRoom ? opts.members.map((m) => ({ name: m.name, member: m.id, c: m.color, here: opts.mine.includes(m.id) }))
-      : opts.mode === 'mic' ? local.map((p, i) => ({ name: p.name, c: i, here: true }))
-      : (opts.players || [opts.mode === 'demo' ? 'Demo singer' : opts.name || 'Test singer']).map((name, i) => ({ name, c: i, here: true }));
-    const turns = turnsMode && cast.length > 1;
-    const hereCount = cast.filter((c) => c.here).length;
-    const sourceFor = async (i) => opts.mode === 'demo' ? { buffer: vocals, audible: true }
-      : opts.mode === 'file' || opts.singer ? { buffer: await engine.load(opts.url || opts.singer), audible: opts.audible }
-      : { stream: await getStream(i) };
-    const lyricsOn = opts.lyrics ?? settings.lyrics;
+    const e = await ensureEngine();
+    const [chart, inst, vocals] = await Promise.all([loadChart(song), e.load(song.inst), e.load(song.vocals)]);
+    if (stale()) return;
+    const difficulty = start.kind === 'local' ? settings.difficulty : start.difficulty;
+    // Who sings: this device's singers, the room's people (this device's seats sing here), or the test's names.
+    let cast = start.kind === 'room'
+      ? start.roster.map((m) => ({ name: m.name, c: m.color, member: /** @type {string | null} */ (m.id), here: start.mine.includes(m.id) }))
+      : (start.kind === 'local' ? localPlayers().map((p) => p.name) : start.names).map((name, i) => ({ name, c: i, member: null, here: true }));
+    // Several people on one device always take turns: they share its mic.
+    const turns = cast.length > 1 && (start.kind === 'room' ? start.turns : true);
+    // Lines go out two at a time round everyone (one at a time when the song is short), so everyone gets some.
+    const perTurn = chart.lines.length >= 2 * cast.length ? 2 : 1;
+    if (turns) cast = cast.slice(0, chart.lines.length);
+    const owners = chart.lines.map((_, i) => (turns ? Math.floor(i / perTurn) % cast.length : null));
+    /** @type {Singer[]} */
+    const singers = cast.map((c, i) => {
+      const base = { name: c.name, color: color(c.c), shown: 0 };
+      if (!c.here) return { ...base, kind: 'online', member: /** @type {string} */ (c.member) };
+      const owned = turns ? new Set(owners.flatMap((o, li) => (o === i ? [li] : []))) : null;
+      return { ...base, kind: 'here', member: c.member, perf: new Performance(chart, difficulty, owned) };
+    });
+    const here = singers.filter((p) => p.kind === 'here');
+    const lyricsOn = here.length > 0 && (start.kind === 'test' ? start.lyrics : settings.lyrics);
     if (lyricsOn) ensureChecker(chart.language ?? null);
-    // Taking turns shares one mic on this device; together, each singer here has their own.
-    const inputs = [];
-    for (let i = 0; i < (turns ? 1 : hereCount); i++) {
-      const input = new VoiceInput(engine, await sourceFor(i), { latency: settings.latency / 1000 });
+    // The voice: the mic, or for the demo and tests a recording (?singer= makes room games use one too).
+    if (here.length) {
+      const recording = start.kind === 'test' ? (start.voice === 'demo' ? song.vocals : start.voice) : start.kind === 'room' ? roomSinger : null;
+      const source = /** @type {VoiceSource} */ (recording
+        ? { kind: 'recording', buffer: await e.load(recording), audible: start.kind === 'test' && start.audible }
+        : { kind: 'mic', stream: await micStream() });
+      if (stale()) return;
+      input = new VoiceInput(e, source);
+      input.latency = settings.latency / 1000;
       await input.connect();
       input.enablePcm(lyricsOn);
-      inputs.push({ input, players: [], shownAt: { disp: null, t: 0 } });
     }
-    // Taking turns: lines go out in pairs, round the whole room.
-    const owners = chart.lines.map((_, i) => (turns ? Math.floor(i / LINES_PER_TURN) % cast.length : null));
-    let k = 0;
-    const players = cast.map((c, i) => {
-      const base = { id: `p${i}`, member: c.member ?? null, name: c.name, color: color(c.c), online: !c.here, shown: 0 };
-      // Friends sing on their own devices: here they are a name and the score their device sends.
-      if (!c.here) return { ...base, remote: {} };
-      const group = inputs[turns ? 0 : k++];
-      const owned = turns ? new Set(owners.flatMap((o, li) => (o === i ? [li] : []))) : null;
-      const p = { ...base, input: group.input, frames: group.input.history, perf: new Performance(chart, difficulty, owned) };
-      group.players.push(p);
-      return p;
-    });
-    const scored = players.filter((p) => p.perf);
-    const voices = inputs.map((g, i) => ({ id: `mic${i}`, color: g.players[0].color, frames: g.input.history }));
-    if (!renderer) renderer = new StageRenderer($('hw'));
+    if (stale()) return input?.disconnect();
+    if (!renderer) renderer = new StageRenderer(/** @type {HTMLCanvasElement} */ ($('hw')));
     renderer.resize();
     renderer.setSong(chart);
-    renderChans(players, turns);
-    const guide = opts.mode === 'demo' || opts.mode === 'file' || opts.singer ? 0 : GUIDE_LEVEL[opts.guide || settings.guide];
-    game = { song, chart, players, scored, inputs, voices, turns, owners, opts, difficulty, lyricsOn, inRoom, round: opts.round, pendingChecks: 0, ui: '', counted: new Set(), sentAt: 0 };
-    // A room's song starts at the same moment on every device; someone who arrives late joins mid-song.
+    renderChans(singers, turns);
+    const guide = start.kind === 'test' ? (start.voice === 'demo' ? 0 : GUIDE_LEVEL[start.guide]) : GUIDE_LEVEL[settings.guide];
+    /** @type {Game} */
+    const g = {
+      start, state: 'starting', song, chart, inst, vocals, guide, singers, here, input, voice: { id: 'mic', color: here[0]?.color ?? '#fff', frames: input?.history ?? [] },
+      turns, owners, difficulty, lyricsOn, round: start.kind === 'room' ? start.round : null, shownAt: { disp: null, t: 0 },
+      pendingChecks: 0, ui: '', counted: new Set(), sentAt: 0,
+    };
+    game = g;
+    // A room's song starts at the same moment on every device; a device that is late joins mid-song.
     let offset = 0;
-    if (inRoom) {
+    if (start.kind === 'room') {
       for (;;) {
-        const wait = opts.startAt - room.serverNow();
-        if (wait <= 160) { offset = Math.max(0, -wait / 1000 - 0.15); break; }
+        const wait = start.startAt - /** @type {Room} */ (room).serverNow();
+        // engine.play starts 0.15 s from now: begin that far into the song past where the room is.
+        if (wait <= 160) { offset = Math.max(0, 0.15 - wait / 1000); break; }
         call(String(Math.ceil(wait / 1000)), null, true);
-        await new Promise((r) => setTimeout(r, Math.min(250, wait - 150)));
-        if (game?.ended) return;
+        await sleep(Math.min(250, wait - 150));
+        if (game !== g) return;
       }
     }
     call('', null);
-    const at = engine.play({ inst, vocals, guide, offset });
-    inputs.forEach((g) => g.input.startWithSong(at));
+    playFrom(g, offset);
+    g.state = 'playing';
     window.__gv.status = 'playing';
     requestAnimationFrame(tick);
   } catch (err) {
     console.error(err);
+    input?.disconnect();
+    if (stale()) return;
+    game = null;
+    releaseMic();
     call('', null);
-    if (err?.name?.endsWith('Error') && /Allowed|NotFound|Overconstrained/.test(err.name)) micError(err);
-    else toast(err.message || String(err));
+    if (err instanceof DOMException && /Allowed|NotFound|Overconstrained/.test(err.name)) micError(err);
+    else toast(message(err));
     go(isGuest() ? 'guest' : 'settings');
     window.__gv.status = 'error';
-    window.__gv.error = String(err?.message || err);
+    window.__gv.error = message(err);
   }
 }
+/** @type {object | null} */
+startGame.token = null;
 
-// The layer over the highway: the countdown, loading, and whose turn it is.
+/** Plays the song from `offset` seconds in, with the voice on the same clock. @param {Game} g @param {number} offset */
+function playFrom(g, offset) {
+  const at = /** @type {AudioEngine} */ (engine).play({ inst: g.inst, vocals: g.vocals, guide: g.guide, offset });
+  g.input?.start(at);
+}
+
+/** The layer over the highway: the countdown, loading, and whose turn it is.
+ * @param {string} text @param {string | null} c @param {boolean} [count] */
 function call(text, c, count = false) {
   const el = $('hw-call');
   el.textContent = text;
@@ -843,22 +855,24 @@ function call(text, c, count = false) {
   el.classList.toggle('is-on', !!text);
 }
 
-function renderChans(players, turns) {
+/** @param {Singer[]} singers @param {boolean} turns */
+function renderChans(singers, turns) {
   const el = $('chans');
-  el.style.setProperty('--n', players.length);
+  el.style.setProperty('--n', String(singers.length));
   el.classList.toggle('is-turns', turns);
-  el.innerHTML = players.map((p) => `<li class="chan" style="--c:${p.color}">
-    <div class="chan__id"><i class="led" aria-hidden="true"></i><i class="ch__sw"></i><span class="chan__name">${esc(p.name)}</span>${p.online ? `<span class="chan__on" title="On their phone">${G.on}<span class="sr">on their phone</span></span>` : ''}</div>
+  el.innerHTML = singers.map((p) => `<li class="chan" style="--c:${p.color}">
+    <div class="chan__id"><i class="led" aria-hidden="true"></i><i class="ch__sw"></i><span class="chan__name">${esc(p.name)}</span>${p.kind === 'online' ? `<span class="chan__on" title="On their phone">${G.on}<span class="sr">on their phone</span></span>` : ''}</div>
     <div class="chan__score"><span class="chan__num">0</span></div>
     <div class="chan__foot"><span class="chan__x" aria-label="Combo">${[1, 2, 3, 4].map((x) => `<span><i class="led"></i>×${x}</span>`).join('')}</span>
       <span class="chan__streak"><span class="silk">Streak</span><b>0</b></span></div></li>`).join('');
 }
 
+/** The nearest note this singer sings, for drawing a voice that is between notes. @param {Performance} perf @param {number} t */
 function nearestNote(perf, t) {
   let best = null, dist = 1.2;
   for (let i = Math.max(0, perf.cursor - 2); i < Math.min(perf.notes.length, perf.cursor + 3); i++) {
     const n = perf.notes[i];
-    // Someone else's line in take-turns scores nothing, so the comet must not look like it's on it.
+    // Someone else's line in take-turns scores nothing, so the line must not look like it's on it.
     if (n.skip) continue;
     const d = t < n.t ? n.t - t : t > n.t + n.d ? t - n.t - n.d : 0;
     if (d < dist) { dist = d; best = n; }
@@ -866,220 +880,246 @@ function nearestNote(perf, t) {
   return best;
 }
 
-// The line being sung at t, or the next one coming up.
-function lineAt(t) {
-  const lines = game.chart.lines;
-  const i = lines.findIndex((l) => t < l.end + 0.3);
-  return i < 0 ? lines.length - 1 : i;
+/** The line being sung at t, or the next one coming up. @param {Game} g @param {number} t */
+function lineAt(g, t) {
+  const i = g.chart.lines.findIndex((l) => t < l.end + 0.3);
+  return i < 0 ? g.chart.lines.length - 1 : i;
+}
+/** Whose turn it is at line i (take turns only). @param {Game} g @param {number} i */
+const ownerOf = (g, i) => { const o = g.owners[i]; return o == null ? null : g.singers[o]; };
+/** A friend's live numbers for this round, from their latest poll. @param {Game} g @param {OnlineSinger} p */
+function liveOf(g, p) {
+  const live = room?.view?.members.find((m) => m.id === p.member)?.live;
+  return live?.round === g.round ? live : null;
 }
 
 function tick() {
-  if (!game || game.ended) return;
+  const g = game;
+  if (!g || g.state !== 'playing' || !engine) return;
   if (engine.playing?.pausedAt != null) { requestAnimationFrame(tick); return; }
-  const { chart, players } = game;
   const now = engine.heardTime();
-  const center = (renderer.lo + renderer.hi) / 2;
-  const tuning = chart.tuning ?? 0;
-
-  for (const g of game.inputs) {
-    for (const f of g.input.drain()) {
-      for (const p of g.players) p.perf.feed(f.t, f.midi);
-      // With one shared mic, the comet follows whoever owns the line at that moment.
-      const shown = g.players.length > 1 ? players[game.owners[lineAt(f.t)]] : g.players[0];
-      const perf = shown.perf || g.players[0].perf;
-      const n = f.midi == null ? null : perf.live.note || nearestNote(perf, f.t);
-      f.disp = shownPitch(f.midi == null ? null : f.midi - tuning, n, center, g.shownAt, f.t);
-    }
+  const r = /** @type {StageRenderer} */ (renderer);
+  const center = (r.lo + r.hi) / 2;
+  const tuning = g.chart.tuning ?? 0;
+  for (const f of g.input?.drain() ?? []) {
+    for (const p of g.here) p.perf.feed(f.t, f.midi);
+    // Taking turns, the line follows whoever's turn it is; it's drawn against their notes.
+    const owner = g.turns ? ownerOf(g, lineAt(g, f.t)) : null;
+    const perf = (owner?.kind === 'here' ? owner : g.here[0]).perf;
+    const n = f.midi == null ? null : perf.current || nearestNote(perf, f.t);
+    f.disp = shownPitch(f.midi == null ? null : f.midi - tuning, n, center, g.shownAt, f.t);
   }
-  for (const p of game.scored) {
-    for (const ev of p.perf.events.splice(0)) if (ev.type === 'line' && game.lyricsOn) scheduleLyricCheck(p, ev.line);
+  for (const p of g.here) for (const line of p.perf.finished.splice(0)) if (g.lyricsOn) checkWords(g, p, line, 500);
+  if (g.turns) {
+    const owner = ownerOf(g, lineAt(g, now));
+    if (owner?.kind === 'here') g.voice.color = owner.color;
   }
-  // One shared mic: the comet takes the colour of whoever's turn it is.
-  if (game.turns) {
-    const a = players[game.owners[lineAt(now)]];
-    if (a.perf) game.voices[0].color = a.color;
+  r.draw(now, g.here, g.input ? [g.voice] : []);
+  if (room && g.round != null && performance.now() - g.sentAt > 900) {
+    g.sentAt = performance.now();
+    for (const p of g.here) if (p.member) room.setLive({ round: g.round, score: p.perf.score, mult: p.perf.multiplier, combo: p.perf.combo }, p.member);
   }
-  renderer.draw(now, game.scored, game.voices);
-  if (game.inRoom && performance.now() - game.sentAt > 900) {
-    game.sentAt = performance.now();
-    for (const p of game.scored) room?.setLive({ round: game.round, score: p.perf.score, mult: p.perf.multiplier, combo: p.perf.combo }, p.member);
-  }
-  updateLyrics(now);
-  updateChans(now);
-  countdown(now);
-  if (now >= chart.duration + 0.3) endGame();
+  updateLyrics(g, now);
+  updateChans(g, now);
+  countdown(g, now);
+  if (now >= g.chart.duration + 0.3) endGame(g);
   else requestAnimationFrame(tick);
 }
 
-function scheduleLyricCheck(p, line) {
+/** Listens to a finished line `delay` ms later (its last notes need to arrive) and cuts its points if the words weren't
+ * sung. @param {Game} g @param {HereSinger} p @param {import('./scoring.js').ScoredLine} line @param {number} delay */
+function checkWords(g, p, line, delay) {
   if (line.points + line.bonus === 0) return;
-  game.pendingChecks++;
-  const g = game;
+  g.pendingChecks++;
   setTimeout(() => {
-    const audio = p.input.audioBetween(line.start - 0.25, line.end + 0.35);
-    const done = () => g.pendingChecks--;
-    if (!audio || !checker) return done();
-    checker
-      .transcribe(audio)
-      .then((text) => {
+    const done = () => { g.pendingChecks--; };
+    const audio = game === g ? g.input?.audioBetween(line.start - 0.25, line.end + 0.35) : null;
+    if (!audio || !checker || checker.dead) return done();
+    checker.transcribe(audio)
+      .then((/** @type {string} */ text) => {
+        if (game !== g) return;
         const ratio = lyricMatch(line.text, text);
-        p.perf.applyLyric(line.index, ratio, text);
-        p.perf.events.splice(0);
+        p.perf.applyLyric(line.index, ratio);
         (window.__gv.lyricLog ||= []).push({ player: p.name, line: line.text, heard: text, ratio });
       })
-      .catch((err) => console.warn('lyric check failed', err))
+      .catch((/** @type {unknown} */ err) => console.warn('words check failed', err))
       .finally(done);
-  }, 500);
+  }, delay);
 }
 
-// The current line, its sung syllables lit; the next line under it. In a gap, the next line waits unlit.
-function updateLyrics(now) {
-  const lines = game.chart.lines;
-  let i = lines.findIndex((l) => now < l.end + 0.3);
-  const waiting = i >= 0 && lines[i].start - now > 2;
+/** The current line, its sung syllables lit; the next line under it. In a gap, the next line waits unlit.
+ * @param {Game} g @param {number} now */
+function updateLyrics(g, now) {
+  const lines = g.chart.lines;
+  const i = lines.findIndex((l) => now < l.end + 0.3);
   const line = i >= 0 ? lines[i] : null;
-  let k = -1;
-  if (line && !waiting) k = line.notes.findLastIndex((n) => n.t <= now);
-  const owner = game.turns && i >= 0 ? game.players[game.owners[i]] : null;
+  const waiting = !!line && line.start - now > 2;
+  const k = line && !waiting ? line.notes.findLastIndex((n) => n.t <= now) : -1;
   const key = `${i}:${k}:${waiting}`;
-  if (key === game.ui) return;
-  game.ui = key;
-  $('hw-lyr').style.setProperty('--lc', owner?.color || '#3ff0b4');
+  if (key === g.ui) return;
+  g.ui = key;
+  $('hw-lyr').style.setProperty('--lc', (g.turns && i >= 0 ? ownerOf(g, i)?.color : null) || '#3ff0b4');
   $('ly-now').innerHTML = line ? line.notes.map((n, j) => (n.syl === '~' ? '' : `<span class="${j < k ? 'd' : j === k ? 'n' : ''}">${esc(n.syl)}</span>`) + (n.wordEnd ? ' ' : '')).join('') : '';
   $('ly-next').textContent = i >= 0 && lines[i + 1] ? lines[i + 1].text : '';
 }
 
-function updateChans(now) {
-  const { chart, players } = game;
+/** @param {Game} g @param {number} now */
+function updateChans(g, now) {
+  const { chart, singers } = g;
   // Taking turns: only the singer up now is lit, and their name is called before their first line.
-  const live = game.turns ? game.owners[lineAt(now)] : -1;
-  if (game.turns) {
+  const live = g.turns ? g.owners[lineAt(g, now)] : null;
+  if (g.turns) {
     const lines = chart.lines, next = lines.findIndex((l) => l.start > now);
-    const owner = next >= 0 ? game.owners[next] : null;
-    const due = next >= 0 && lines[next].start - now < 2.6 && (next === 0 || game.owners[next - 1] !== owner);
-    if (due && $('hw-call').dataset.k !== String(next)) {
-      $('hw-call').dataset.k = next;
-      call(`${players[owner].name}’s turn`, players[owner].color);
-    } else if (!due && $('hw-call').dataset.k != null && !$('hw-call').classList.contains('is-count')) {
-      delete $('hw-call').dataset.k;
+    const owner = next >= 0 ? ownerOf(g, next) : null;
+    const due = !!owner && lines[next].start - now < 2.6 && (next === 0 || g.owners[next - 1] !== g.owners[next]);
+    const el = $('hw-call');
+    if (owner && due && el.dataset.k !== String(next)) {
+      el.dataset.k = String(next);
+      call(`${owner.name}’s turn`, owner.color);
+    } else if (!due && el.dataset.k != null && !el.classList.contains('is-count')) {
+      delete el.dataset.k;
       call('', null);
     }
   }
   $$('#chans .chan').forEach((el, si) => {
-    const p = players[si];
-    const on = live < 0 || si === live;
+    const p = singers[si];
+    const on = live == null || si === live;
     el.classList.toggle('is-live', on);
-    el.querySelector('.chan__id .led').classList.toggle('on', on);
-    const { score = 0, mult = 1, combo = 0 } = p.perf ? { score: p.perf.score, mult: p.perf.multiplier, combo: p.perf.combo } : p.remote;
+    el.querySelector('.chan__id .led')?.classList.toggle('on', on);
+    const lv = p.kind === 'online' ? liveOf(g, p) : null;
+    const { score, mult, combo } = p.kind === 'here'
+      ? { score: p.perf.score, mult: p.perf.multiplier, combo: p.perf.combo }
+      : { score: +(lv?.score ?? 0) || 0, mult: clamp(+(lv?.mult ?? 1) || 1, 1, 4), combo: Math.max(0, Math.round(+(lv?.combo ?? 0) || 0)) };
     p.shown += (score - p.shown) * 0.2;
     if (Math.abs(score - p.shown) < 1) p.shown = score;
-    const v = fmt(Math.round(p.shown / 10) * 10), num = el.querySelector('.chan__num');
+    const v = fmt(Math.round(p.shown / 10) * 10), num = /** @type {HTMLElement} */ (el.querySelector('.chan__num'));
     if (num.textContent !== v) num.textContent = v;
-    el.querySelectorAll('.chan__x > span').forEach((x, i) => { x.classList.toggle('is-on', i < mult); x.querySelector('.led').classList.toggle('on', i < mult); });
-    const st = el.querySelector('.chan__streak b');
-    if (st.textContent !== String(combo)) st.textContent = combo;
+    el.querySelectorAll('.chan__x > span').forEach((x, i) => { x.classList.toggle('is-on', i < mult); x.querySelector('.led')?.classList.toggle('on', i < mult); });
+    const st = /** @type {HTMLElement} */ (el.querySelector('.chan__streak b'));
+    if (st.textContent !== String(combo)) st.textContent = String(combo);
   });
   $('hw-prog').style.transform = `scaleX(${clamp(now / chart.duration, 0, 1)})`;
   const time = `${fmtTime(now)} / ${fmtTime(chart.duration)}`;
   if ($('pt-time').textContent !== time) $('pt-time').textContent = time;
 }
 
-// 3, 2, 1 on the beats before the first note.
-function countdown(now) {
-  const first = game.chart.lines[0]?.notes[0];
-  if (!first) return;
-  const spb = 60 / game.chart.bpm;
+/** 3, 2, 1 on the beats before the first note (taking turns calls the first singer instead). @param {Game} g @param {number} now */
+function countdown(g, now) {
+  const first = g.chart.lines[0]?.notes[0];
+  if (!first || g.turns || !(g.chart.bpm > 0)) return;
+  const spb = 60 / g.chart.bpm;
   const left = Math.ceil((first.t - now) / spb);
-  // Taking turns calls the first singer instead.
-  if (game.turns) return;
-  if (left >= 1 && left <= 3 && !game.counted.has(left)) {
-    game.counted.add(left);
+  if (left >= 1 && left <= 3 && !g.counted.has(left)) {
+    g.counted.add(left);
     call(String(left), null, true);
-    setTimeout(() => { if ($('hw-call').textContent === String(left)) call('', null); }, spb * 950);
+    setTimeout(() => { if (game === g && $('hw-call').textContent === String(left)) call('', null); }, spb * 950);
   }
 }
 
-async function endGame() {
-  if (!game || game.ended) return;
-  game.ended = true;
-  engine.stop();
-  const g = game;
+/** @param {Game} g */
+async function endGame(g) {
+  if (g.state === 'ended') return;
+  g.state = 'ended';
+  /** @type {AudioEngine} */ (engine).stop();
+  // Lines that end with the song finish now; their words are checked too.
+  for (const p of g.here) {
+    p.perf.completeBefore(Infinity);
+    for (const line of p.perf.finished.splice(0)) if (g.lyricsOn) checkWords(g, p, line, 0);
+  }
   if (g.pendingChecks > 0) {
     call('Checking the words', null);
     const t0 = performance.now();
-    while (g.pendingChecks > 0 && performance.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 150));
+    while (g.pendingChecks > 0 && performance.now() - t0 < 15000 && game === g) await sleep(150);
   }
-  call('', null);
-  g.inputs.forEach(({ input }) => input.disconnect());
-  const results = g.scored.map((p) => ({ name: p.name, color: p.color, member: p.member, ...p.perf.finish() }));
-  window.__gv.results = results.map(({ bestLine, worstLine, ...r }) => ({ ...r, bestLine: bestLine?.text, worstLine: worstLine?.text }));
-  window.__gv.status = 'done';
-  if (g.inRoom) for (const r of results) room?.send({ result: { round: g.round, score: r.score, accuracy: r.accuracy, title: r.title, stars: r.stars } }, r.member);
-  else if (g.opts.mode === 'mic') for (const r of results) addToBoard(g.song.id, { name: r.name, score: r.score, acc: r.accuracy, difficulty: g.difficulty, at: Date.now() });
-  go('results');
-  printResults(g, results, true);
-}
-
-function stopGame() {
-  if (!game) return;
-  game.ended = true;
-  engine.stop();
-  game.inputs.forEach(({ input }) => input.disconnect());
+  if (game !== g) return;
   game = null;
+  call('', null);
+  g.input?.disconnect();
+  releaseMic();
+  const mine = g.here.map((p) => ({ p, r: p.perf.finish() }));
+  window.__gv.results = mine.map(({ p, r }) => ({ name: p.name, ...r }));
+  window.__gv.status = 'done';
+  if (room && g.round != null) for (const { p, r } of mine) if (p.member) room.send({ result: { round: g.round, score: r.score, accuracy: r.accuracy, title: r.title, stars: r.stars, left: false } }, p.member);
+  go('results');
+  printResults(g, mine, true);
 }
 
-// Best scores on this device, kept for when they get a place on screen again.
-function addToBoard(songId, entry) {
-  const list = [...store.get(`board:${songId}`, []), entry].sort((a, b) => b.score - a.score).slice(0, 8);
-  store.set(`board:${songId}`, list);
+/** Ends the game now (quit, restart, leaving the room). Friends in the room see this device's singers as left. */
+function stopGame() {
+  const g = game;
+  startGame.token = null;
+  if (!g) return;
+  game = null;
+  g.state = 'ended';
+  engine?.stop();
+  g.input?.disconnect();
+  releaseMic();
+  if (room && g.round != null) for (const p of g.here) if (p.member) room.send({ result: { round: g.round, score: p.perf.score, left: true } }, p.member);
 }
 
 // ---------- Pause ----------
 async function pause() {
-  if (!game || game.ended) return;
+  if (game?.state !== 'playing' || !engine) return;
   await engine.pause();
   go('pause');
 }
+// In a room everyone else kept singing: Resume catches up with them.
 async function resume() {
+  const g = game;
+  if (!g || !engine) return;
   go('game');
   await engine.unpause();
+  if (g.start.kind === 'room' && room && game === g) playFrom(g, (room.serverNow() - g.start.startAt) / 1000 + 0.15);
 }
 function renderPause() {
-  const g = game, now = engine.heardTime();
+  const g = /** @type {Game} */ (game), now = /** @type {AudioEngine} */ (engine).heardTime();
   setLcd($('lcd-pause'), `<div class="lcd__in"><img class="lcd__cover" src="${g.song.cover}" alt="">
     <div class="lcd__bar"><span><b>Paused</b></span><span>${fmtTime(now)} / ${fmtTime(g.chart.duration)}</span></div>
     <div class="lcd__meta"><p class="lcd__title">${esc(g.song.title)}</p>${segbar(now / g.chart.duration)}</div></div>`);
-  $('delay').value = settings.latency;
+  // A room's song runs on everyone's devices: restarting it here alone would put this device out of step.
+  $('restart').hidden = g.start.kind === 'room';
+  /** @type {HTMLInputElement} */ ($('delay')).value = String(settings.latency);
   $('delay-out').textContent = `${settings.latency} ms`;
 }
 
 // ---------- Results: a printer feeds out a receipt ----------
+/** @typedef {{ name: string, color: string, online: boolean } & ({ kind: 'done', score: number, stars: number, title: string } | { kind: 'singing', score: number } | { kind: 'left', score: number })} Entry */
+/** @type {{ g: Game, mine: { p: HereSinger, r: import('./scoring.js').Result }[] } | null} */
 let lastResults = null;
+let resultsKey = '';
+/** @param {HTMLElement} el @param {number} to @param {number} delay @param {number} dur */
 function countUp(el, to, delay, dur) {
   if (reduced.matches) { el.textContent = fmt(to); return; }
   el.textContent = '0';
   const t0 = performance.now() + delay;
-  const f = (t) => { const p = clamp((t - t0) / dur, 0, 1); el.textContent = fmt(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(f); };
+  const f = (/** @type {number} */ t) => { const p = clamp((t - t0) / dur, 0, 1); el.textContent = fmt(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(f); };
   requestAnimationFrame(f);
 }
-// In a room, friends' scores arrive from their devices as they finish; the receipt reprints as they do.
-function printResults(g, results, fresh) {
-  lastResults = { g, results };
-  const entries = [...results];
-  if (g.inRoom) {
-    for (const p of g.players) {
-      if (p.perf) continue;
-      const r = room?.view?.members.find((m) => m.id === p.member)?.result;
-      // A friend's result comes from their device: take only the numbers and the title, as plain values.
-      entries.push(r?.round === g.round
-        ? { name: p.name, color: p.color, online: true, score: +r.score || 0, accuracy: +r.accuracy || 0, stars: +r.stars || 0, title: String(r.title) }
-        : { name: p.name, color: p.color, online: true, score: +p.remote.score || 0, pending: true });
-    }
+/** In a room, friends' scores arrive from their devices as they finish; the receipt reprints as they do.
+ * @param {Game} g @param {{ p: HereSinger, r: import('./scoring.js').Result }[]} mine @param {boolean} fresh */
+function printResults(g, mine, fresh) {
+  lastResults = { g, mine };
+  /** @type {Entry[]} */
+  const entries = mine.map(({ p, r }) => ({ kind: 'done', name: p.name, color: p.color, online: false, score: r.score, stars: r.stars, title: r.title }));
+  for (const p of g.singers) {
+    if (p.kind !== 'online') continue;
+    const m = room?.view?.members.find((x) => x.id === p.member);
+    const r = m?.result?.round === g.round ? m.result : null;
+    const base = { name: p.name, color: p.color, online: true };
+    // Gone from the room, or told us they stopped: left. Otherwise their final numbers, or their latest score so far.
+    entries.push(!m || r?.left ? { ...base, kind: 'left', score: r?.score ?? 0 }
+      : r ? { ...base, kind: 'done', score: r.score, stars: r.stars, title: r.title }
+        : { ...base, kind: 'singing', score: +(liveOf(g, p)?.score ?? 0) || 0 });
   }
-  const ranked = entries.sort((a, b) => b.score - a.score);
-  const key = ranked.map((r) => `${r.name}:${r.score}:${!!r.pending}`).join('|');
-  if (!fresh && key === printResults.key) return;
-  printResults.key = key;
+  // Ties rank by name, so every device prints the same order.
+  const ranked = entries.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  const key = ranked.map((r) => `${r.name}:${r.score}:${r.kind}`).join('|');
+  if (!fresh && key === resultsKey) return;
+  resultsKey = key;
+  /** @param {Entry} r */
+  const verdict = (r) => (r.kind === 'done' ? esc(r.title) : r.kind === 'left' ? 'Left' : 'Still singing');
+  /** @param {Entry} r */
+  const stars = (r) => `<span class="rc__stars" role="img" aria-label="${r.kind === 'done' ? r.stars : 0} stars">${r.kind === 'done' ? starRow(r.stars) : ''}</span>`;
   $('rc-song').textContent = g.song.title;
   $('rc-meta').textContent = `${DIFFICULTY[g.difficulty].label} · ${g.turns ? 'Take turns' : 'Together'} · ${fmtTime(g.chart.duration)}`;
   const d = new Date();
@@ -1087,24 +1127,24 @@ function printResults(g, results, fresh) {
   $('rc-count').textContent = `${ranked.length} singer${ranked.length === 1 ? '' : 's'}`;
   $('rc-rows').innerHTML = ranked.map((r, k) => `<li class="rc__row" style="--c:${r.color}">
     <span class="rc__rank">${k + 1}</span><span class="rc__name"><i class="rc__sw"></i>${esc(r.name)}${r.online ? `<span class="rc__on" title="On their phone">${G.on}<span class="sr">on their phone</span></span>` : ''}</span><span class="rc__score" data-to="${r.score}">${fmt(r.score)}</span>
-    <span class="rc__title">${r.pending ? 'Still singing' : esc(r.title)}</span><span class="rc__stars" role="img" aria-label="${r.stars || 0} stars">${r.pending ? '' : starRow(r.stars)}</span></li>`).join('');
+    <span class="rc__title">${verdict(r)}</span>${stars(r)}</li>`).join('');
   const w = ranked[0];
-  setLcd($('lcd-res'), `<div class="win" style="--c:${w.color}"><div class="lcd__bar"><span><b>1st</b>of ${ranked.length}</span><span>${esc(g.song.title)}</span></div>
+  if (w) setLcd($('lcd-res'), `<div class="win" style="--c:${w.color}"><div class="lcd__bar"><span><b>1st</b>of ${ranked.length}</span><span>${esc(g.song.title)}</span></div>
     <p class="win__name">${esc(w.name)}</p><p class="win__score">${fmt(w.score)}</p>
-    <div class="win__foot"><span>${w.pending ? 'Still singing' : esc(w.title)}</span><span class="rc__stars" role="img" aria-label="${w.stars || 0} stars">${w.pending ? '' : starRow(w.stars)}</span></div></div>`);
-  if (!fresh) return;
+    <div class="win__foot"><span>${verdict(w)}</span>${stars(w)}</div></div>`);
+  if (!fresh || !w) return;
   const paper = $('paper');
   paper.classList.remove('printing');
   void paper.offsetWidth;
   paper.classList.add('printing');
-  $$('.rc__score').forEach((el, k) => countUp(el, +el.dataset.to, 260 + k * 90, 520));
-  countUp(document.querySelector('.win__score'), w.score, 120, 640);
+  $$('.rc__score').forEach((el, k) => countUp(el, Number(el.dataset.to), 260 + k * 90, 520));
+  countUp(/** @type {HTMLElement} */ (document.querySelector('.win__score')), w.score, 120, 640);
   // A friend's phone goes back to the room; only the host picks what's next.
   $('again-pick').hidden = isGuest();
-  $('again').querySelector('.top').textContent = isGuest() ? 'Back to the room' : 'Sing again';
+  /** @type {HTMLElement} */ ($('again').querySelector('.top')).textContent = isGuest() ? 'Back to the room' : 'Sing again';
 }
 
-// ---------- Add your own song ----------
+// ---------- Upload your own song ----------
 const STEPS = [
   { key: 'read', label: 'Reading the file' },
   { key: 'separate', label: 'Separating the voice from the music' },
@@ -1112,104 +1152,116 @@ const STEPS = [
   { key: 'notes', label: 'Finding the notes' },
   { key: 'save', label: 'Saving it on this device' },
 ];
-// Raw pipeline stages → the step they belong to, with a note while that part runs. Model downloads also name the
-// model, so the step can say it was downloaded once it is done.
+/** Raw pipeline stages: the step each belongs to, the part of that step it fills (so progress never goes backwards),
+ * a note while it runs, and the model it downloads (named once it is done).
+ * @type {Record<string, { step: string, from: number, to: number, note?: string, model?: string }>} */
 const STAGE = {
-  read: ['read'], download: ['separate', 'Downloading the voice model (only the first time)', 'voice'], separate: ['separate'],
-  upload: ['separate', 'Uploading to our server'], server: ['separate', 'Our server is separating the voice and writing down the words'],
-  pitch: ['lyrics', 'Tracking the melody'], 'pitch-model': ['lyrics', 'Downloading the melody model (only the first time)', 'melody'],
-  'lyrics-model': ['lyrics', 'Downloading the speech model (only the first time)', 'speech'],
-  words: ['lyrics', 'Writing down the words'], lyrics: ['lyrics'], notes: ['notes'], save: ['save'],
+  read: { step: 'read', from: 0, to: 1 },
+  model: { step: 'separate', from: 0, to: 0.3, model: 'voice' },
+  separate: { step: 'separate', from: 0.3, to: 1 },
+  'pitch-model': { step: 'lyrics', from: 0, to: 0.1, model: 'melody' },
+  pitch: { step: 'lyrics', from: 0.1, to: 0.3, note: 'Tracking the melody' },
+  'lyrics-model': { step: 'lyrics', from: 0.3, to: 0.6, model: 'speech' },
+  words: { step: 'lyrics', from: 0.6, to: 1, note: 'Writing down the words' },
+  notes: { step: 'notes', from: 0, to: 1 },
+  save: { step: 'save', from: 0, to: 1 },
 };
-let importFile = null;
-let importAbort = null;
-let importReplace = null; // the upload a run remakes (its id), or null for a new song
-let importWhere = '';
-const isMedia = (f) => /^(audio|video)\//.test(f.type) || /\.(mp3|m4a|aac|wav|flac|ogg|oga|opus|webm|mp4|m4v|mov|mkv|avi|wma|aif|aiff|3gp|flv|wmv)$/i.test(f.name);
-const songName = (file) => file.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Untitled';
+/** What the upload screen holds: the file, and the song a remake replaces (its id). */
+let upload = { file: /** @type {Blob | null} */ (null), replace: /** @type {string | null} */ (null) };
+/** @type {AbortController | null} the upload running now */
+let importRun = null;
+/** @param {Blob} f */
+const isMedia = (f) => /^(audio|video)\//.test(f.type) || (f instanceof File && /\.(mp3|m4a|aac|wav|flac|ogg|oga|opus|webm|mp4|m4v|mov|mkv|avi|wma|aif|aiff|3gp|flv|wmv)$/i.test(f.name));
+const fileName = (/** @type {Blob} */ f) => (f instanceof File ? f.name : '');
+let firstRunNote = '';
 
-async function openImport(file = null, replace = null) {
-  importReplace = replace;
-  importFile = file;
+/** @param {Blob | null} file @param {string | null} replace */
+async function openImport(file, replace) {
+  upload = { file, replace };
   go('upload');
-  const { gpuDevice } = await import('./import/importer.js');
-  const gpu = await gpuDevice();
-  importWhere = gpu ? 'The first time, this downloads about 700 MB'
-    : SERVER ? 'Our server does the heavy part and deletes your file after'
-      : 'This browser has no graphics chip access, so it takes a few minutes per minute of song';
+  const { gpuInfo } = await import('./import/importer.js');
+  firstRunNote = (await gpuInfo()) ? 'The first time, this downloads about 700 MB' : 'This browser has no graphics chip access, so it takes a few minutes per minute of song';
   if (screen === 'upload') renderUpload();
 }
 function renderUpload() {
-  const f = importFile, ok = f && isMedia(f), bay = $('bay');
+  const f = upload.file, ok = !!f && isMedia(f), bay = $('bay');
   bay.dataset.state = !f ? 'empty' : ok ? 'file' : 'error';
-  $('bay-t').textContent = f ? f.name : 'Drop an audio or video file';
-  $('bay-s').textContent = !f ? importWhere : ok ? `${(f.size / 1e6).toFixed(1)} MB` : 'Not an audio or video file';
+  $('bay-t').textContent = f ? fileName(f) : 'Drop an audio or video file';
+  $('bay-s').textContent = !f ? firstRunNote : ok ? `${(f.size / 1e6).toFixed(1)} MB` : 'Not an audio or video file';
   $('bay-led').classList.toggle('on', !!f);
   $('bay-led').classList.toggle('led--mint', !f || ok);
-  $('choose').querySelector('.top').textContent = f ? 'Choose another' : 'Choose file';
-  $('make').disabled = !ok;
+  /** @type {HTMLElement} */ ($('choose').querySelector('.top')).textContent = f ? 'Choose another' : 'Choose file';
+  /** @type {HTMLButtonElement} */ ($('make')).disabled = !ok;
 }
+/** @param {File | undefined} f */
 function takeFile(f) {
   if (!f) return;
-  if (screen === 'upload') { importFile = f; renderUpload(); } else openImport(f, null);
+  if (screen === 'upload') { upload.file = f; renderUpload(); } else openImport(f, null);
 }
 
-// Each step's LED: done (with any model it downloaded), running (with its progress), or waiting.
-function renderSteps(name, current, progress, note, got, error) {
-  const at = STEPS.findIndex((s) => s.key === current);
-  const all = Math.floor(((at + (progress ?? 0)) / STEPS.length) * 100);
-  setLcd($('lcd-up'), `<div class="lcd__in lcd__in--msg"><div class="lcd__bar"><span><b>${error ? 'That didn’t work' : importReplace ? 'Remaking it' : 'Making it singable'}</b></span><span>${error ? '' : `${all}%`}</span></div>
+/** Each step's LED: done (with any model it downloaded), running (with its progress), or waiting.
+ * @param {{ name: string, step: string, p: number | null, note: string, got: Map<string, string[]>, error?: string }} s */
+function renderSteps({ name, step, p, note, got, error }) {
+  const at = STEPS.findIndex((s) => s.key === step);
+  const all = Math.floor(((at + (p ?? 0)) / STEPS.length) * 100);
+  setLcd($('lcd-up'), `<div class="lcd__in lcd__in--msg"><div class="lcd__bar"><span><b>${error ? 'That didn’t work' : upload.replace ? 'Remaking it' : 'Making it singable'}</b></span><span>${error ? '' : `${all}%`}</span></div>
     <p class="lcd__title${error ? ' lcd__err' : ''}">${esc(error || name)}</p>${error ? '' : segbar(all / 100)}</div>`);
   $('up-steps').innerHTML = STEPS.map((s, i) => {
-    const st = i < at ? 'done' : i === at ? (error ? 'wait' : 'run') : 'wait';
-    const pct = Math.round((progress ?? 0) * 100);
-    const right = st === 'done' ? G.done : st === 'run' && progress != null ? `<span class="xfer"><span class="xfer__seg">${segs(pct)}</span>${pct}%</span>` : '';
+    const st = i < at ? 'done' : i === at && !error ? 'run' : 'wait';
+    const pct = Math.round((p ?? 0) * 100);
+    const right = st === 'done' ? G.done : st === 'run' && p != null ? `<span class="xfer"><span class="xfer__seg">${segs(pct)}</span>${pct}%</span>` : '';
     const models = got.get(s.key) || [];
-    const sub = st === 'run' && note ? note : models.length ? `Downloaded the ${models.join(' and ')} model${models.length > 1 ? 's' : ''}` : '';
+    const sub = st === 'run' && note ? note : models.length ? `Downloaded the ${models.join(' and ')} model${models.length > 1 ? 's' : ''}. That only happens the first time.` : '';
     return `<li class="ust" data-s="${st}"><i class="led${st === 'done' ? ' led--mint on' : st === 'run' ? ' on blink' : ''}" aria-hidden="true"></i><span class="ust__l">${s.label}</span><span class="ust__r">${right}</span>${sub ? `<span class="ust__sub">${esc(sub)}</span>` : ''}</li>`;
   }).join('');
 }
 
 async function runImport() {
-  const file = importFile;
-  // A remake from the stored original has no file name; it keeps the song's title.
-  if (!file || (file.name && !isMedia(file)) || importAbort) return;
+  const { file, replace } = upload;
+  if (!file || !isMedia(file) || importRun) return;
+  const run = new AbortController();
+  importRun = run;
   go('upload-progress');
-  const name = file.name ? songName(file.name) : SONGS.find((s) => s.id === importReplace)?.title || 'Your song';
-  importAbort = new AbortController();
-  const signal = importAbort.signal;
-  let last = 0;
-  // A model counts as downloaded when its download ran (a stored one reports done at once) and the next part began.
+  const name = fileName(file).replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || SONGS.find((s) => s.id === replace)?.title || 'Your song';
+  // A model counts as downloaded when its download showed progress (a stored one reports done at once).
+  /** @type {Map<string, string[]>} */
   const got = new Map();
-  let fetching = null, cur = 'read';
+  /** @type {{ stage: string, step: string, model: string } | null} */
+  let fetching = null;
+  let shown = { step: 'read', p: 0 }, last = 0;
+  /** @param {string} s @param {number} p */
   const stage = (s, p) => {
-    const [step, note, model] = STAGE[s] || [s];
-    cur = step;
-    if (fetching && s !== fetching.name) {
+    const st = STAGE[s];
+    if (!st) return;
+    if (fetching && s !== fetching.stage) {
       got.set(fetching.step, [...(got.get(fetching.step) || []), fetching.model]);
       fetching = null;
     }
-    const downloading = p > 0 && p < 1;
-    if (model && downloading) fetching = { name: s, step, model };
+    const downloading = !!st.model && p > 0 && p < 1;
+    if (st.model && downloading) fetching = { stage: s, step: st.step, model: st.model };
+    const sp = st.from + (st.to - st.from) * clamp(p, 0, 1);
+    shown = { step: st.step, p: st.step === shown.step ? Math.max(shown.p, sp) : sp };
     const now = performance.now();
-    if (downloading && now - last < 120) return;
+    if (now - last < 120 && p > 0 && p < 1) return;
     last = now;
-    if (screen === 'upload-progress') renderSteps(name, step, p, model && !downloading ? null : note, got);
+    const note = downloading ? `Downloading the ${st.model} model (only the first time)` : st.note ?? '';
+    if (screen === 'upload-progress' && importRun === run) renderSteps({ name, step: shown.step, p: shown.p, note, got });
   };
-  renderSteps(name, 'read', 0, null, got);
+  renderSteps({ name, step: 'read', p: 0, note: '', got });
   const t0 = performance.now();
   try {
     const { importSong } = await import('./import/importer.js');
-    const rec = await importSong(file, { lyrics: $('lyrics').value, server: SERVER, signal, stage });
-    renderSteps(name, 'save', null, null, got);
-    // A remake keeps the old song's place: same id (so its scores stay) and first upload time.
-    const old = importReplace ? SONGS.findIndex((s) => s.id === importReplace) : -1;
-    if (importReplace) {
-      rec.id = rec.chart.id = importReplace;
-      rec.createdAt = (await getUserSong(importReplace))?.createdAt ?? rec.createdAt;
+    const rec = await importSong(/** @type {File} */ (file), { lyrics: /** @type {HTMLTextAreaElement} */ ($('lyrics')).value, signal: run.signal, stage });
+    stage('save', 0);
+    // A remake keeps the old song's place: same id (so a room's pick still finds it) and first upload time.
+    if (replace) {
+      rec.id = replace;
+      rec.createdAt = (await getUserSong(replace))?.createdAt ?? rec.createdAt;
     }
+    run.signal.throwIfAborted();
     await saveUserSong(rec);
     const song = userSong(rec);
+    const old = SONGS.findIndex((s) => s.id === rec.id);
     if (old >= 0) {
       releaseSong(SONGS[old]);
       SONGS[old] = song;
@@ -1217,25 +1269,26 @@ async function runImport() {
     sendLibrary();
     settings.songId = song.id;
     saveSettings();
-    if (room?.view?.isHost) room.act('set', { song: song.id }).catch((err) => toast(err.message));
-    $('lyrics').value = '';
-    importFile = null;
+    if (room?.view?.isHost) room.act('set', { song: song.id }).catch((err) => toast(message(err)));
+    /** @type {HTMLTextAreaElement} */ ($('lyrics')).value = '';
+    upload = { file: null, replace: null };
     window.__gv.imported = { id: rec.id, lines: rec.chart.lines.length, secs: Math.round((performance.now() - t0) / 1000), where: rec.where, language: rec.chart.language };
-    importAbort = null;
-    go('song');
+    if (screen === 'upload-progress') go('song');
   } catch (err) {
-    importAbort = null;
-    if (err?.name === 'AbortError') return;
+    if (run.signal.aborted) return;
     console.error(err);
-    renderSteps(name, cur, null, null, got, err.message || String(err));
-    window.__gv.importError = String(err?.message || err);
+    renderSteps({ name, step: shown.step, p: null, note: '', got, error: message(err) });
+    window.__gv.importError = message(err);
+  } finally {
+    if (importRun === run) importRun = null;
   }
 }
 
-// Uploads made by an older version: remake from the stored original, pick the file again (uploads from before files
-// were kept), or play it as it is. A friend's song can only be remade by the friend.
+/** Uploads made by an older version: remake from the stored original, pick the file again (uploads from before files
+ * were kept), or play it as it is. A friend's song can only be remade by the friend. @param {Song} song */
 async function askRemake(song) {
   const rec = await getUserSong(song.id);
+  if (!rec) return go('settings');
   const friend = rec.where === 'friend';
   const line = rec.source ? 'The new version finds the notes and words better'
     : friend ? `Ask ${rec.from || 'your friend'} to remake it and share it again`
@@ -1245,99 +1298,112 @@ async function askRemake(song) {
     <div class="lcd__meta"><p class="lcd__title">${esc(song.title)}</p><p class="lcd__by">${esc(line)}</p></div></div>`);
   const remake = $('outdated-remake');
   remake.hidden = friend && !rec.source;
-  remake.querySelector('.top').textContent = rec.source ? 'Remake it' : 'Choose the file';
+  /** @type {HTMLElement} */ (remake.querySelector('.top')).textContent = rec.source ? 'Remake it' : 'Choose the file';
   remake.onclick = () => {
-    if (rec.source) { importFile = rec.source; importReplace = song.id; runImport(); } else openImport(null, song.id);
+    if (rec.source) { upload = { file: rec.source, replace: song.id }; runImport(); } else openImport(null, song.id);
   };
   $('outdated-play').onclick = () => { outdatedOk = true; toSettings(); };
   go('outdated');
 }
 
 // ---------- Wiring ----------
-encSong = makeEncoder($('enc-song'), { count: () => catalog().length, get: () => selIndex(), set: selectSong, onEnter: toSettings });
-initSlide($('mode'), (v) => { setMode(v); connectMonitors(); });
-initSlide($('sw-diff'), (v) => { settings.difficulty = DIFFS[+v]; saveSettings(); if (room?.view?.isHost) room.act('set', { difficulty: settings.difficulty }).catch(() => {}); });
-// Speakers: the mic reopens with echo cancellation at the next song, and the original vocal starts off, since out
-// loud it sings your notes into your mic (turn it back up if you like).
-initSlide($('sw-out'), (v) => {
+const encSong = makeEncoder($('enc-song'), { count: () => catalog().length, get: () => selIndex(), set: selectSong, onEnter: toSettings });
+const mode = new Slide($('mode'), (v) => setMode(/** @type {Mode} */ (v)));
+const diff = new Slide($('sw-diff'), (v) => {
+  settings.difficulty = DIFFS[+v];
+  saveSettings();
+  if (room?.view?.isHost) room.act('set', { difficulty: settings.difficulty }).catch((err) => toast(message(err)));
+});
+// Speakers: the mic opens with echo cancellation at the next song, and the original vocal starts off, since out loud it
+// sings your notes into your mic (turn it back up if you like).
+const out = new Slide($('sw-out'), (v) => {
   settings.speakers = v === '1';
-  if (settings.speakers) { settings.guide = 'off'; setRadio($('sw-vocal'), 0); }
+  if (settings.speakers) { settings.guide = 'off'; vocal.set('0'); }
   saveSettings();
 });
-initSlide($('sw-vocal'), (v) => { settings.guide = GUIDES[+v]; saveSettings(); });
+const vocal = new Slide($('sw-vocal'), (v) => { settings.guide = GUIDES[+v]; saveSettings(); });
 
-async function sing() {
-  // With friends online, the room starts the song on every device at once.
+// With friends online, the room starts the song on every device at once.
+function sing() {
   if (room?.view && remoteHere()) {
-    if (!room.view.isHost) return;
-    return room.act('start', { song: selectedId(), mode: roomMode(), difficulty: settings.difficulty }).catch((err) => toast(err.message));
+    if (!room.view.isHost || starting) return;
+    starting = true;
+    syncSing();
+    room.act('start', { song: selectedId(), mode: roomMode(), difficulty: settings.difficulty })
+      .catch((err) => toast(message(err)))
+      .finally(() => { starting = false; if (screen === 'settings') syncSing(); });
+    return;
   }
-  startGame({ mode: 'mic' });
+  startGame({ kind: 'local' });
 }
 
 document.addEventListener('click', (e) => {
-  const t = e.target.closest('button');
+  const t = /** @type {HTMLButtonElement | null} */ (/** @type {Element} */ (e.target).closest('button'));
   if (!t || t.disabled) return;
-  if (t.id === 'latch-words') { settings.lyrics = !settings.lyrics; saveSettings(); if (settings.lyrics) ensureChecker(); syncWords(); }
-  else if (t.id === 'upload-btn') openImport();
+  if (t.id === 'latch-words') { settings.lyrics = !settings.lyrics; saveSettings(); if (settings.lyrics) ensureChecker(languageOf(selectedSong())); syncWords(); }
+  else if (t.id === 'upload-btn') openImport(null, null);
   else if (t.id === 'choose') $('file').click();
   else if (t.id === 'make') runImport();
   else if (t.id === 'sing') sing();
   else if (t.id === 'pause-btn') pause();
   else if (t.id === 'resume') resume();
-  else if (t.id === 'restart') { const opts = game?.opts; engine.unpause().then(() => { stopGame(); startGame(opts || { mode: 'mic' }); }); }
-  else if (t.id === 'quit') { engine.unpause().then(() => { stopGame(); go(isGuest() ? 'guest' : 'song'); }); }
-  else if (t.id === 'again') { isGuest() ? go('guest') : go('settings'); }
+  else if (t.id === 'restart') { if (game) startGame(game.start); }
+  else if (t.id === 'quit') { if (game) { stopGame(); go(isGuest() ? 'guest' : 'song'); } }
+  else if (t.id === 'again') go(isGuest() ? 'guest' : 'settings');
   else if (t.id === 'again-pick') go('song');
   else if (t.id === 'invite-btn') copyInvite(t);
   else if (t.dataset.pick != null) { const list = catalog(), k = list.findIndex((s) => s.id === t.dataset.pick); selectSong(k, Math.sign(k - selIndex(list))); encSong.render(); }
   else if (t.dataset.add != null) addSinger();
-  else if (t.dataset.remove != null) removeSinger(+t.dataset.remove);
+  else if (t.dataset.remove != null) removeSinger(Number(t.dataset.remove));
   else if (t.dataset.back != null) back();
-  else if (t.dataset.go === 'singers' && screen === 'title') { ensureEngine(); roomInLink() && !room ? joinRoom(roomInLink()) : go('singers'); }
+  else if (t.dataset.go === 'singers' && screen === 'title') { ensureEngine(); const code = roomInLink(); if (code && !room) joinRoom(code); else go(room && isGuest() ? 'guest' : 'singers'); }
   else if (t.dataset.go === 'settings') toSettings();
   else if (t.dataset.go) go(t.dataset.go);
 });
-$('file').addEventListener('change', (e) => { takeFile(e.target.files[0]); e.target.value = ''; });
-$('bay').addEventListener('click', (e) => { if (!e.target.closest('button')) $('file').click(); });
+$('file').addEventListener('change', (e) => { const inp = /** @type {HTMLInputElement} */ (e.target); takeFile(inp.files?.[0]); inp.value = ''; });
+$('bay').addEventListener('click', (e) => { if (!(/** @type {Element} */ (e.target)).closest('button')) $('file').click(); });
 $('delay').addEventListener('input', (e) => {
-  settings.latency = +e.target.value;
+  settings.latency = Number(/** @type {HTMLInputElement} */ (e.target).value);
   $('delay-out').textContent = `${settings.latency} ms`;
   saveSettings();
-  game?.inputs.forEach(({ input }) => (input.latency = settings.latency / 1000));
+  if (game?.input) game.input.latency = settings.latency / 1000;
 });
 
 // Names: typed straight into the channel. A cleared name keeps the last one when you leave the box.
-document.addEventListener('focusin', (e) => { if (e.target.matches('.namebox input')) e.target.dataset.prev = e.target.value; });
+/** @param {EventTarget | null} t */
+const nameBox = (t) => (t instanceof HTMLInputElement && t.matches('.namebox input') ? t : null);
+document.addEventListener('focusin', (e) => { const inp = nameBox(e.target); if (inp) inp.dataset.prev = inp.value; });
 document.addEventListener('input', (e) => {
-  const inp = e.target;
-  if (inp.dataset.singer == null || !inp.value.trim()) return;
-  const p = settings.players[+inp.dataset.singer];
+  const inp = nameBox(e.target);
+  const p = inp && settings.players[Number(inp.dataset.singer)];
+  if (!inp || !p || !inp.value.trim()) return;
   p.name = inp.value.trim();
   saveSettings();
-  if (p.seat) room?.send({ name: p.name }, p.seat);
-  inp.closest('.ch').querySelector('[data-remove]')?.setAttribute('aria-label', `Remove ${p.name}`);
+  const seat = room?.seats[Number(inp.dataset.singer)];
+  if (seat) room?.send({ name: p.name }, seat.id);
+  inp.closest('.ch')?.querySelector('[data-remove]')?.setAttribute('aria-label', `Remove ${p.name}`);
 });
 document.addEventListener('focusout', (e) => {
-  const inp = e.target;
-  if (!inp.matches?.('.namebox input') || inp.value.trim()) return;
-  inp.value = inp.dataset.prev || settings.players[+inp.dataset.singer]?.name || 'Singer';
+  const inp = nameBox(e.target);
+  if (inp && !inp.value.trim()) inp.value = inp.dataset.prev || settings.players[Number(inp.dataset.singer)]?.name || 'Singer';
 });
 
 document.addEventListener('keydown', (e) => {
-  const t = e.target;
-  if (t.matches?.('.namebox input')) {
-    if (e.key === 'Enter') { e.preventDefault(); t.blur(); }
-    else if (e.key === 'Escape') { t.value = t.dataset.prev; t.dispatchEvent(new Event('input', { bubbles: true })); t.blur(); }
+  const t = /** @type {HTMLElement} */ (e.target);
+  const inp = nameBox(t);
+  if (inp) {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    else if (e.key === 'Escape') { inp.value = inp.dataset.prev || ''; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur(); }
     return;
   }
-  if (t.matches?.('textarea')) return;
+  if (t.matches?.('textarea') || e.repeat) return;
   if (screen === 'game' && (e.key === 'Escape' || e.key === 'p')) { e.preventDefault(); pause(); return; }
   const key = t.closest?.('.key');
   if (key && (e.key === ' ' || e.key === 'Enter')) key.classList.add('is-down');
   if (e.key === 'Escape') { back(); return; }
-  if (e.key === 'Enter' && !t.closest?.('button, a, [role=slider]')) {
-    const k = device.querySelector('.screen.is-on .key--sun:not(:disabled)');
+  // Enter presses the screen's main key, unless focus is on a control that has its own use for Enter.
+  if (e.key === 'Enter' && !t.closest?.('button, a, input, [role=slider]')) {
+    const k = /** @type {HTMLButtonElement | null} */ (device.querySelector('.screen.is-on .key--sun:not(:disabled)'));
     if (!k) return;
     e.preventDefault();
     k.classList.add('is-down');
@@ -1354,37 +1420,39 @@ const dropHere = () => (screen === 'song' || screen === 'upload') && !isGuest();
 addEventListener('dragenter', (e) => { e.preventDefault(); if (dropHere() && ++dragDepth) device.classList.add('is-drop'); });
 addEventListener('dragover', (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = dropHere() ? 'copy' : 'none'; });
 addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; device.classList.remove('is-drop'); } });
-addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; device.classList.remove('is-drop'); if (dropHere()) takeFile(e.dataTransfer.files[0]); });
+addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; device.classList.remove('is-drop'); if (dropHere()) takeFile(e.dataTransfer?.files[0]); });
 
 // ---------- Boot ----------
 // Built-in songs' credits and lengths come from their charts.
-for (const s of SONGS.filter((x) => !x.user)) {
-  loadChart(s).then((c) => { credit.set(s.id, c.credit || ''); credit.set(`${s.id}:len`, fmtTime(c.duration)); if (screen === 'song') renderSongList(); }).catch(() => {});
+for (const s of SONGS) {
+  if (s.kind !== 'builtin') continue;
+  loadChart(s).then((c) => { credit.set(s.id, { by: c.credit || '', len: fmtTime(c.duration) }); if (screen === 'song') renderSongList(); }).catch(() => {});
 }
 loadUserSongs();
 go('title');
 // Test hook: ?singer=<audio url> makes room games sing that recording instead of the mic.
-const roomSinger = params.get('singer') || undefined;
-window.__gv.songs = () => loadUserSongs().then(() => SONGS.map((s) => ({ id: s.id, title: s.title, user: !!s.user })));
+const roomSinger = params.get('singer');
+window.__gv.songs = () => loadUserSongs().then(() => SONGS.map((s) => ({ id: s.id, title: s.title, upload: s.kind === 'upload' })));
 
 // Automation and test hook: ?autoplay=<song id>&input=demo|mic|<audio url>&lyrics=1&difficulty=normal&players=Ann,Ben
 // (players makes the recorded singer's part go round those names, two lines each).
-if (params.get('autoplay')) {
+const autoplay = params.get('autoplay');
+if (autoplay) {
   const input = params.get('input') || 'demo';
-  const opts = {
-    mode: input === 'demo' ? 'demo' : input === 'mic' ? 'mic' : 'file',
-    url: input,
-    name: params.get('name') || undefined,
-    players: params.get('players')?.split(',') || undefined,
+  /** @type {Start} */
+  const start = input === 'mic' ? { kind: 'local' } : {
+    kind: 'test',
+    song: autoplay,
+    voice: input,
+    names: params.get('players')?.split(',') || [params.get('name') || 'Test singer'],
     audible: params.get('audible') === '1',
-    lyrics: params.has('lyrics') ? params.get('lyrics') === '1' : undefined,
-    difficulty: params.get('difficulty') || undefined,
-    guide: params.get('guide') || undefined,
+    lyrics: params.get('lyrics') === '1',
+    difficulty: DIFFS.includes(/** @type {Difficulty} */ (params.get('difficulty'))) ? /** @type {Difficulty} */ (params.get('difficulty')) : 'normal',
+    guide: GUIDES.includes(/** @type {Guide} */ (params.get('guide'))) ? /** @type {Guide} */ (params.get('guide')) : 'soft',
   };
   loadUserSongs().then(() => {
-    if (SONGS.some((s) => s.id === params.get('autoplay'))) settings.songId = params.get('autoplay');
-    if (opts.lyrics) ensureChecker();
-    window.__gv.start = () => startGame(opts);
-    if (params.get('wait') !== '1') ensureEngine().then(() => startGame(opts));
+    if (haveSong(autoplay)) settings.songId = autoplay;
+    window.__gv.start = () => startGame(start);
+    if (params.get('wait') !== '1') ensureEngine().then(() => startGame(start));
   });
 }

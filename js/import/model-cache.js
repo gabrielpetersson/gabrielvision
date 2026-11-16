@@ -1,3 +1,4 @@
+// @ts-check
 // Downloads a model file once and keeps it in Cache Storage, reporting download progress.
 
 export async function cachedModel(url, onProgress = () => {}) {

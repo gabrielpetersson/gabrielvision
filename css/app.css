@@ -55,7 +55,7 @@ img { display: block; }
   box-shadow: 0 0 0 3px var(--face-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .device[data-screen="title"] .brand, .device[data-screen="title"] .rail__r { display: none; }
 .device[data-screen="title"] .jackwrap { display: flex; }
-.device:is([data-screen="title"], [data-screen="guest"], [data-screen="results"], [data-screen="game"], [data-screen="pause"]) .steps { display: none; }
+.device:is([data-screen="title"], [data-screen="guest"], [data-screen="results"], [data-screen="game"], [data-screen="pause"], [data-screen="upload-progress"]) .steps { display: none; }
 .device:is([data-screen="game"], [data-screen="pause"]) .playtag { display: flex; }
 .device[data-screen="guest"] .conntag, .device[data-screen="results"] .restag { display: flex; }
 
@@ -93,8 +93,6 @@ img { display: block; }
 .key--sun { --top: var(--sun); --top-hi: var(--sun-hi); --skirt-c: var(--sun-skirt); --hole: #c9bf9a; }
 .key--sun:hover:not(:disabled) .top::after { opacity: .2; }
 .key--sun:disabled { --top: #efe6c4; --top-hi: #f3ecd1; --skirt-c: #d6cba5; }
-.key--ink { --top: #2b2a27; --top-hi: #3b3a36; --skirt-c: #0a0a09; --legend: var(--face); }
-.key--ink:hover:not(:disabled) .top::after { opacity: .07; }
 .key--sq { width: 56px; --px: 0; }
 .key--round { --r: 50%; width: 44px; --h: 44px; --px: 0; --lift: -3px; }
 .key--round::before { border-radius: 50%; inset: -5px -3px -3px; }

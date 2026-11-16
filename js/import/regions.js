@@ -1,8 +1,10 @@
+// @ts-check
 // Finds the stretches of a separated vocal where someone sings, as Whisper-sized pieces (under 28 s).
 // Transcribing only these keeps Whisper from inventing words over instrumental parts.
 
 const MAX = 28;
 
+/** @param {Float32Array} rms @param {number} hop seconds per frame @returns {{ start: number, end: number }[]} */
 export function vocalRegions(rms, hop) {
   const n = rms.length;
   const db = Array.from(rms, (r) => 20 * Math.log10(r + 1e-9));
@@ -28,9 +30,11 @@ export function vocalRegions(rms, hop) {
     if (last && start <= last.end) last.end = Math.max(last.end, end);
     else merged.push({ start, end });
   }
+  /** @type {{ start: number, end: number }[]} */
   const out = [];
+  /** @param {{ start: number, end: number }} r @returns {void} */
   const split = (r) => {
-    if (r.end - r.start <= MAX) return out.push(r);
+    if (r.end - r.start <= MAX) { out.push(r); return; }
     // Cut at the quietest 200 ms between 12 s and 28 s into the region.
     const w = Math.round(0.2 / hop);
     let best = null, bestDb = Infinity;
@@ -40,8 +44,10 @@ export function vocalRegions(rms, hop) {
       for (let k = i - w; k <= i + w; k++) s += db[Math.max(0, Math.min(n - 1, k))];
       if (s < bestDb) { bestDb = s; best = t; }
     }
-    out.push({ start: r.start, end: best });
-    split({ start: best, end: r.end });
+    // A level that is not a number (a damaged separation) never wins: cut at the longest piece instead.
+    const cut = best ?? r.start + MAX;
+    out.push({ start: r.start, end: cut });
+    split({ start: cut, end: r.end });
   };
   merged.forEach(split);
   return out;

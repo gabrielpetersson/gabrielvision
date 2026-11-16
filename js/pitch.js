@@ -1,11 +1,13 @@
+// @ts-check
 // YIN pitch detector (de Cheveigné & Kawahara, 2002) on a 16 kHz-ish mono window.
 // Shared by the AudioWorklet (live mic) and by offline tests, so both paths score identically.
 
 // Below 70 Hz is bass guitar and room rumble, not a singing voice.
-export const MIN_HZ = 70;
-export const MAX_HZ = 1100;
+const MIN_HZ = 70;
+const MAX_HZ = 1100;
 
 export class Yin {
+  /** @param {number} sampleRate */
   constructor(sampleRate, size = 1024, threshold = 0.2) {
     this.sampleRate = sampleRate;
     this.size = size;
@@ -16,6 +18,7 @@ export class Yin {
   }
 
   // Returns { hz, clarity, rms }. hz is 0 when no periodic pitch was found.
+  /** @param {Float32Array} buf */
   detect(buf) {
     const { d, minTau, maxTau } = this;
     const W = this.size - maxTau;
@@ -78,10 +81,6 @@ export class Yin {
   }
 }
 
+/** @param {number} hz */
 export const hzToMidi = (hz) => 69 + 12 * Math.log2(hz / 440);
 
-const NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
-export const midiName = (m) => {
-  const r = Math.round(m);
-  return NAMES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1);
-};

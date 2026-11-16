@@ -1,5 +1,7 @@
+// @ts-check
 // Title, artist and cover art from an MP3's ID3v2 tag. Other formats fall back to the file name.
 
+/** @param {Uint8Array} bytes */
 const text = (bytes) => {
   const enc = bytes[0];
   const body = bytes.subarray(1);
@@ -7,19 +9,23 @@ const text = (bytes) => {
   return new TextDecoder(label).decode(body).replace(/\0+$/g, '').replace(/^\uFEFF/, '').trim();
 };
 
+/** @param {File} file @returns {Promise<{ title?: string, artist?: string, cover?: Blob }>} */
 export async function readTags(file) {
   const head = new Uint8Array(await file.slice(0, 10).arrayBuffer());
   if (head[0] !== 0x49 || head[1] !== 0x44 || head[2] !== 0x33) return {};
   const version = head[3];
-  const syncsafe = (b, o) => (b[o] << 21) | (b[o + 1] << 14) | (b[o + 2] << 7) | b[o + 3];
+  const syncsafe = (/** @type {Uint8Array} */ b, /** @type {number} */ o) => (b[o] << 21) | (b[o + 1] << 14) | (b[o + 2] << 7) | b[o + 3];
   const size = syncsafe(head, 6);
   const tag = new Uint8Array(await file.slice(10, 10 + size).arrayBuffer());
+  /** @type {{ title?: string, artist?: string, cover?: Blob }} */
   const out = {};
   let o = 0;
   while (o + 10 <= tag.length) {
     const id = String.fromCharCode(...tag.subarray(o, o + 4));
     if (!/^[A-Z0-9]{4}$/.test(id)) break;
-    const len = version === 4 ? syncsafe(tag, o + 4) : (tag[o + 4] << 24) | (tag[o + 5] << 16) | (tag[o + 6] << 8) | tag[o + 7];
+    const len = version === 4 ? syncsafe(tag, o + 4) : ((tag[o + 4] << 24) | (tag[o + 5] << 16) | (tag[o + 6] << 8) | tag[o + 7]) >>> 0;
+    // A damaged frame size ends the tag rather than looping or reading past it.
+    if (len <= 0 || o + 10 + len > tag.length) break;
     const body = tag.subarray(o + 10, o + 10 + len);
     if (id === 'TIT2') out.title = text(body);
     else if (id === 'TPE1') out.artist = text(body);

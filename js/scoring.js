@@ -1,138 +1,98 @@
-// Pure scoring engine: feed it (song time, sung MIDI pitch or null) frames in time order and it
-// scores every note by how close the voice stays to it. No DOM, no audio — offline tests use it too.
+// @ts-check
+// Pure scoring engine: feed it (song time, sung MIDI pitch or null) frames in time order and it scores every note by
+// how close the voice stays to it. No DOM, no audio: offline tests use it too.
 
+/** @type {Record<Difficulty, { label: string, perfect: number, window: number }>} */
 export const DIFFICULTY = {
   easy: { label: 'Easy', perfect: 0.9, window: 2.6 },
   normal: { label: 'Normal', perfect: 0.6, window: 2.0 },
   hard: { label: 'Hard', perfect: 0.3, window: 1.1 },
 };
 
-export const RATINGS = [
-  { min: 0.9, key: 'perfect', label: 'Perfect', bonus: 1000 },
-  { min: 0.75, key: 'great', label: 'Great', bonus: 600 },
-  { min: 0.55, key: 'good', label: 'Good', bonus: 300 },
-  { min: 0.3, key: 'ok', label: 'OK', bonus: 100 },
-  { min: -1, key: 'miss', label: 'Missed', bonus: 0 },
-];
+// A finished line's bonus by how much of it was sung in tune.
+const LINE_BONUS = [[0.9, 1000], [0.75, 600], [0.55, 300], [0.3, 100]];
 
-export const TITLES = [
-  { min: 0.95, title: 'Legend' },
-  { min: 0.88, title: 'Superstar' },
-  { min: 0.78, title: 'Headliner' },
-  { min: 0.65, title: 'Rising Star' },
-  { min: 0.5, title: 'Karaoke Regular' },
-  { min: 0.3, title: 'Shower Singer' },
-  { min: -1, title: 'Brave Soul' },
-];
+/** The titles a result can carry. rooms/worker.js accepts only these from other devices. */
+export const TITLES = /** @type {const} */ ([
+  [0.95, 'Legend'],
+  [0.88, 'Superstar'],
+  [0.78, 'Headliner'],
+  [0.65, 'Rising Star'],
+  [0.5, 'Karaoke Regular'],
+  [0.3, 'Shower Singer'],
+  [-1, 'Brave Soul'],
+]);
 
 const POINTS_PER_SECOND = 500;
 const HIT_ACCURACY = 0.5;
 // Holding a bar in tune for this share of it is full marks: nobody sings through every consonant, breath and release.
 const HOLD = 0.6;
-// The pitch detector needs ~2/3 of its 64 ms window voiced before it locks on, so onsets read this much late.
-const DETECTOR_LAG = 0.045;
 
-// Signed distance from the target in semitones, folded so any octave counts (SingStar rule).
+/** Signed distance from the target in semitones, folded so any octave counts (SingStar rule).
+ * @param {number} midi @param {number} target */
 export const foldDiff = (midi, target) => ((((midi - target) % 12) + 18) % 12) - 6;
 
-export const ratingFor = (acc) => RATINGS.find((r) => acc >= r.min);
-export const titleFor = (acc) => TITLES.find((r) => acc >= r.min).title;
+/** @typedef {Note & { line: number, skip: boolean, weight: number, frames: number, credit: number, spans: [number, number][], done: boolean, acc: number }} ScoredNote */
+/** @typedef {Line & { index: number, skip: boolean, acc: number, points: number, bonus: number, lyricFactor: number | null, lyricRatio: number | null }} ScoredLine */
+/** @typedef {{ score: number, accuracy: number, pitchAccuracy: number, lyricAccuracy: number | null, title: string, stars: number, notesHit: number, notesTotal: number }} Result */
 
 export class Performance {
-  // owned: the line indexes this singer sings when friends take turns (null = every line).
-  constructor(chart, difficulty, owned = null) {
+  /** @param {Chart} chart @param {Difficulty} difficulty @param {Set<number> | null} owned the line indexes this singer
+   * sings when friends take turns (null = every line) */
+  constructor(chart, difficulty, owned) {
     this.diff = DIFFICULTY[difficulty];
     // Uploaded songs can sit between semitones; sung pitch is compared after removing that offset.
     this.tuning = chart.tuning ?? 0;
-    this.lines = chart.lines.map((line, li) => ({
-      ...line,
-      index: li,
-      skip: !!owned && !owned.has(li),
-      done: false,
-      acc: 0,
-      points: 0,
-      bonus: 0,
-      rating: null,
-      lyric: null,
-    }));
-    this.notes = this.lines.flatMap((line) =>
-      line.notes.map((n) => ({
-        ...n,
-        line: line.index,
-        skip: line.skip,
-        weight: POINTS_PER_SECOND * n.d * (n.golden ? 2 : 1),
-        frames: 0,
-        credit: 0,
-        spans: [],
-        sung: [],
-        attack: null,
-        done: false,
-        acc: 0,
-      })),
-    );
+    /** @type {ScoredLine[]} */
+    this.lines = chart.lines.map((line, index) => ({ ...line, index, skip: !!owned && !owned.has(index), acc: 0, points: 0, bonus: 0, lyricFactor: null, lyricRatio: null }));
+    /** @type {ScoredNote[]} */
+    this.notes = this.lines.flatMap((line) => line.notes.map((n) => ({
+      ...n, line: line.index, skip: line.skip, weight: POINTS_PER_SECOND * n.d * (n.golden ? 2 : 1), frames: 0, credit: 0, spans: [], done: false, acc: 0,
+    })));
     this.cursor = 0;
     this.lineCursor = 0;
     this.score = 0;
     this.combo = 0;
-    this.bestCombo = 0;
     this.multiplier = 1;
-    this.events = [];
-    this.live = { t: 0, midi: null, diff: null, credit: 0, note: null };
-    this.cents = { sum: 0, sq: 0, n: 0 };
-    this.octaveFrames = 0;
-    this.inNoteVoiced = 0;
-    this.range = { lo: Infinity, hi: -Infinity };
-    this.lastT = 0;
+    /** @type {ScoredNote | null} the note being sung right now */
+    this.current = null;
+    /** @type {ScoredLine[]} lines this singer finished since the last look (for the words check) */
+    this.finished = [];
   }
 
+  /** @param {number} absDiff */
   credit(absDiff) {
     const { perfect, window } = this.diff;
     if (absDiff <= perfect) return 1;
     return Math.max(0, 1 - (absDiff - perfect) / (window - perfect));
   }
 
-  // The scoring window skips the very start (consonants, scoops) and end (release) of each note.
+  /** The scoring window skips the very start (consonants, scoops) and end (release) of each note. @param {Note} n */
   static window(n) {
-    const lead = Math.min(0.07, n.d * 0.25);
-    const tail = Math.min(0.05, n.d * 0.15);
-    return [n.t + lead, n.t + n.d - tail];
+    return [n.t + Math.min(0.07, n.d * 0.25), n.t + n.d - Math.min(0.05, n.d * 0.15)];
   }
 
+  /** @param {number} t song time @param {number | null} sung MIDI, or null when not singing */
   feed(t, sung) {
-    this.lastT = t;
     this.completeBefore(t);
-    const midi = sung == null ? null : sung - this.tuning;
     const found = this.noteAt(t);
     const n = found?.skip ? null : found;
-    let diff = null, c = 0;
-    if (n && midi != null) {
-      diff = foldDiff(midi, n.p);
-      c = this.credit(Math.abs(diff));
-    }
-    this.live = { t, midi, diff, credit: c, note: n };
+    this.current = n;
     if (!n) return;
-    if (c >= 0.5 && n.attack == null) n.attack = t;
     const [w0, w1] = Performance.window(n);
     if (t < w0 || t > w1) return;
     n.frames++;
-    if (midi == null) return;
+    if (sung == null) return;
+    const c = this.credit(Math.abs(foldDiff(sung - this.tuning, n.p)));
     n.credit += c;
-    this.inNoteVoiced++;
-    if (Math.abs(diff) < 1) {
-      this.cents.sum += diff * 100;
-      this.cents.sq += diff * diff * 10000;
-      this.cents.n++;
-      if (Math.abs(midi - n.p) > 9) this.octaveFrames++;
-    }
     if (c >= 0.5) {
       const last = n.spans[n.spans.length - 1];
       if (last && t - last[1] < 0.06) last[1] = t;
       else n.spans.push([t, t]);
-      n.sung.push(midi);
     }
   }
 
-  // The note whose time (plus a little grace) contains t, scanning forward from the cursor.
+  /** The note whose time (plus a little grace) contains t, scanning forward from the cursor. @param {number} t */
   noteAt(t) {
     for (let i = this.cursor; i < this.notes.length; i++) {
       const n = this.notes[i];
@@ -142,104 +102,65 @@ export class Performance {
     return null;
   }
 
+  /** @param {number} t */
   completeBefore(t) {
-    while (this.cursor < this.notes.length) {
-      const n = this.notes[this.cursor];
-      if (t < n.t + n.d + 0.08) break;
-      this.completeNote(n);
-      this.cursor++;
-    }
-    while (this.lineCursor < this.lines.length) {
-      const line = this.lines[this.lineCursor];
-      if (t < line.end + 0.12) break;
-      this.completeLine(line);
-      this.lineCursor++;
-    }
+    while (this.cursor < this.notes.length && t >= this.notes[this.cursor].t + this.notes[this.cursor].d + 0.08) this.completeNote(this.notes[this.cursor++]);
+    while (this.lineCursor < this.lines.length && t >= this.lines[this.lineCursor].end + 0.12) this.completeLine(this.lines[this.lineCursor++]);
   }
 
+  /** @param {ScoredNote} n */
   completeNote(n) {
     n.done = true;
     if (n.skip) return;
-    // Range uses each note's median sung pitch, so single-frame octave slips don't count.
-    if (n.sung.length >= 3) {
-      const m = [...n.sung].sort((a, b) => a - b)[n.sung.length >> 1];
-      this.range.lo = Math.min(this.range.lo, m);
-      this.range.hi = Math.max(this.range.hi, m);
-    }
     n.acc = n.frames ? Math.min(1, n.credit / (n.frames * HOLD)) : 0;
-    const hit = n.acc >= HIT_ACCURACY;
-    if (hit) {
-      this.combo++;
-      this.bestCombo = Math.max(this.bestCombo, this.combo);
-    } else this.combo = 0;
+    this.combo = n.acc >= HIT_ACCURACY ? this.combo + 1 : 0;
     this.multiplier = Math.min(4, 1 + Math.floor(this.combo / 6));
     const points = Math.round((n.weight * n.acc) / 10) * 10 * this.multiplier;
     this.score += points;
     this.lines[n.line].points += points;
-    this.events.push({ type: 'note', note: n, acc: n.acc, hit, points });
   }
 
+  /** @param {ScoredLine} line */
   completeLine(line) {
     const notes = this.notes.filter((n) => n.line === line.index);
-    notes.forEach((n) => !n.done && this.completeNote(n));
-    line.done = true;
+    for (const n of notes) if (!n.done) this.completeNote(n);
     if (line.skip) return;
     const dur = notes.reduce((s, n) => s + n.d, 0);
     line.acc = dur ? notes.reduce((s, n) => s + n.acc * n.d, 0) / dur : 0;
-    line.rating = ratingFor(line.acc);
-    line.bonus = line.rating.bonus;
+    line.bonus = LINE_BONUS.find(([min]) => line.acc >= min)?.[1] ?? 0;
     this.score += line.bonus;
-    this.events.push({ type: 'line', line, rating: line.rating, acc: line.acc, bonus: line.bonus });
+    this.finished.push(line);
   }
 
-  // Lyric check result for a finished line: ratio of expected words that were recognised.
-  // Below 40% of the words, the line keeps only part of its points (25% when nothing matched).
-  applyLyric(index, ratio, heard) {
+  /** The words check's verdict on a finished line: the share of its words that were heard. Below 40% of the words,
+   * the line keeps only part of its points (25% when nothing matched).
+   * @param {number} index @param {number} ratio */
+  applyLyric(index, ratio) {
     const line = this.lines[index];
-    if (!line || line.lyric) return;
-    const factor = ratio >= 0.4 ? 1 : 0.25 + (ratio / 0.4) * 0.75;
-    const penalty = Math.round(((line.points + line.bonus) * (1 - factor)) / 10) * 10;
-    line.lyric = { ratio, factor, penalty, heard };
-    this.score -= penalty;
-    this.events.push({ type: 'lyric', line, ratio, penalty, heard });
+    if (!line || line.lyricFactor != null) return;
+    line.lyricRatio = ratio;
+    line.lyricFactor = ratio >= 0.4 ? 1 : 0.25 + (ratio / 0.4) * 0.75;
+    this.score -= Math.round(((line.points + line.bonus) * (1 - line.lyricFactor)) / 10) * 10;
   }
 
+  /** @returns {Result} */
   finish() {
     this.completeBefore(Infinity);
     const lines = this.lines.filter((l) => !l.skip);
     const notes = this.notes.filter((n) => !n.skip);
-    const total = lines.reduce((s, l) => s + (l.end - l.start), 0);
-    const factor = (l) => l.lyric?.factor ?? 1;
-    const accuracy = total ? lines.reduce((s, l) => s + l.acc * (l.end - l.start) * factor(l), 0) / total : 0;
-    const pitchAccuracy = total ? lines.reduce((s, l) => s + l.acc * (l.end - l.start), 0) / total : 0;
-    const checked = lines.filter((l) => l.lyric);
-    const lyricAccuracy = checked.length ? checked.reduce((s, l) => s + l.lyric.ratio, 0) / checked.length : null;
-    const attacks = notes
-      .filter((n) => n.attack != null && n.syl !== '~')
-      .map((n) => n.attack - n.t - DETECTOR_LAG)
-      .sort((a, b) => a - b);
-    const sorted = [...lines].sort((a, b) => b.acc - a.acc);
-    const { sum, sq, n } = this.cents;
+    const len = (/** @type {ScoredLine} */ l) => l.end - l.start;
+    const total = lines.reduce((s, l) => s + len(l), 0);
+    const accuracy = total ? lines.reduce((s, l) => s + l.acc * len(l) * (l.lyricFactor ?? 1), 0) / total : 0;
+    const checked = lines.filter((l) => l.lyricRatio != null);
     return {
       score: this.score,
       accuracy,
-      pitchAccuracy,
-      lyricAccuracy,
-      title: titleFor(accuracy),
+      pitchAccuracy: total ? lines.reduce((s, l) => s + l.acc * len(l), 0) / total : 0,
+      lyricAccuracy: checked.length ? checked.reduce((s, l) => s + (l.lyricRatio ?? 0), 0) / checked.length : null,
+      title: /** @type {(typeof TITLES)[number]} */ (TITLES.find(([min]) => accuracy >= min))[1],
       stars: Math.max(0, Math.min(5, Math.round(accuracy * 10) / 2)),
       notesHit: notes.filter((x) => x.acc >= HIT_ACCURACY).length,
       notesTotal: notes.length,
-      goldenHit: notes.filter((x) => x.golden && x.acc >= HIT_ACCURACY).length,
-      goldenTotal: notes.filter((x) => x.golden).length,
-      bestCombo: this.bestCombo,
-      centsMean: n > 20 ? sum / n : null,
-      centsSpread: n > 20 ? Math.sqrt(Math.max(0, sq / n - (sum / n) ** 2)) : null,
-      lateMs: attacks.length > 5 ? attacks[Math.floor(attacks.length / 2)] * 1000 : null,
-      otherOctave: this.inNoteVoiced > 20 ? this.octaveFrames / this.inNoteVoiced : 0,
-      range: Number.isFinite(this.range.lo) ? this.range : null,
-      bestLine: sorted[0],
-      worstLine: sorted[sorted.length - 1],
-      lines: lines.map((l) => ({ text: l.text, acc: l.acc, rating: l.rating?.key, lyric: l.lyric?.ratio ?? null })),
     };
   }
 }
