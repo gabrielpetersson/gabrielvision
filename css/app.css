@@ -115,20 +115,30 @@ body[data-screen='results'] .bg-img { filter: blur(14px) brightness(0.45); }
   align-items: center; max-width: 1360px; width: 100%; margin: 0 auto; min-height: 0;
 }
 .picker { display: grid; gap: 22px; justify-items: center; min-width: 0; }
-.carousel { position: relative; width: 100%; height: clamp(240px, 38vh, 380px); perspective: 1200px; }
-.cover {
-  position: absolute; left: 50%; top: 50%;
-  width: clamp(200px, 30vh, 330px); aspect-ratio: 1; max-width: 70vw;
-  border-radius: 18px; border: 0; padding: 0; overflow: hidden; background: #111;
-  transform: translate(-50%, -50%) translateX(calc(var(--o) * 62%)) rotateY(calc(var(--o) * -28deg)) scale(calc(1 - var(--abs) * 0.22));
-  opacity: calc(1 - var(--abs) * 0.38);
-  z-index: calc(10 - var(--abs));
-  transition: transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s, box-shadow 0.4s;
-  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+/* Song reels: each row is a drum turning on its upright axis. You see its front: the cover facing you, two each side
+   bending away, 30 degrees apart. --s is the cover size, set by the width (five across) and the height (all rows fit);
+   when the height is what limits it, the drum gets wider (up to 2.7 covers of radius) so a row still fills the width. */
+.picker { container-type: inline-size; }
+.reels {
+  --s: min(calc(100cqw / 4.4), calc((100dvh - 290px) / var(--rows) - 34px), 240px);
+  --R: clamp(calc(var(--s) * 2.1), calc((100cqw - var(--s) / 2) / 1.75), calc(var(--s) * 2.7));
+  display: grid; gap: 6px; width: 100%; user-select: none; -webkit-user-select: none;
 }
-.cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cover.sel { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85), 0 0 60px color-mix(in srgb, var(--accent) 55%, transparent), 0 30px 70px rgba(0, 0, 0, 0.6); }
-.cover[data-far] { pointer-events: none; opacity: 0; }
+.reel { position: relative; height: calc(var(--s) + 30px); perspective: calc(var(--R) * 3.3); touch-action: pan-y; }
+.reel .cover {
+  position: absolute; left: 50%; top: 50%; width: var(--s); border: 0; padding: 0; background: none; color: inherit; cursor: pointer;
+  display: grid; gap: 6px; justify-items: center;
+  transform: translate(-50%, -50%) translateZ(calc(var(--R) * -1)) rotateY(calc(var(--o) * 30deg)) translateZ(var(--R));
+  opacity: clamp(0, calc((3 - var(--abs)) * 2), 1);
+  filter: brightness(calc(1 - var(--abs) * 0.08));
+  transition: transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s, filter 0.3s;
+}
+.reel .cover img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; pointer-events: none; background: #111; }
+.reel .cover span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 13px/1.2 'Archivo', var(--ui); }
+.reel .cover[data-far] { pointer-events: none; }
+.reel .cover.jump, .reels.spinning .cover { transition: none; }
+.reel .cover.jump:not([data-far]) img { animation: reel-pop 0.35s; }
+@keyframes reel-pop { from { opacity: 0; } }
 .song-info { text-align: center; display: grid; gap: 8px; justify-items: center; max-width: 640px; }
 .song-info h2 { margin: 0; font: 800 clamp(24px, 3.4vw, 42px)/1.05 var(--display); text-wrap: balance; letter-spacing: -0.01em; }
 .credit { margin: 0; color: var(--muted); }
@@ -466,8 +476,9 @@ body[data-screen='results'] .bg-img { filter: blur(14px) brightness(0.45); }
 .vinyl .switch input:checked + .knob::after { transform: translateX(18px); }
 
 /* Song select */
-.vinyl .cover { border: 4px solid var(--vink); border-radius: 12px; box-shadow: 6px 6px 0 var(--vink); }
-.vinyl .cover.sel { box-shadow: 12px 12px 0 var(--vink); }
+.vinyl .reel .cover img { border: 4px solid var(--vink); border-radius: 12px; box-shadow: 5px 5px 0 var(--vink); }
+.vinyl .reel .cover.sel img { box-shadow: 0 0 0 5px var(--vsun), 0 0 0 8px var(--vink); }
+.vinyl .reel .cover.sel span { font-weight: 900; }
 .vinyl .song-info h2 { font: 400 clamp(26px, 3.4vw, 44px)/1.05 'Archivo Black', sans-serif; letter-spacing: -0.01em; }
 .vinyl .credit { color: var(--muted); }
 .vinyl .chip { border: 2px solid var(--vink); background: var(--vwhite); color: var(--vink); font: 800 11px/1 'Archivo', sans-serif; letter-spacing: 0.1em; }
@@ -609,8 +620,6 @@ body[data-screen='results'] .bg-img { filter: blur(14px) brightness(0.45); }
 @media (max-width: 900px) {
   .select-grid, .results-grid { grid-template-columns: minmax(0, 1fr); }
   #select-screen { place-items: start stretch; }
-  .carousel { height: clamp(200px, 30vh, 280px); }
-  .cover { width: clamp(150px, 26vh, 240px); }
   .setup { margin-bottom: 24px; }
 }
 @media (max-width: 560px) {

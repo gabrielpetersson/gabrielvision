@@ -175,40 +175,79 @@ function loadUserSongs() {
   return userSongsLoaded;
 }
 
+// Songs sit on reels stacked one above the other. Each reel is a drum turning on its upright axis: you see its front,
+// five covers bending away from you, and spin it to bring the rest round. Every 20 songs add a reel, up to four; past
+// 80 songs the four reels just get longer.
+const REEL_SONGS = 20;
+const MAX_REELS = 4;
+let reelFront = []; // per reel, the place (within that reel) of the song facing you
+
+const reelSize = () => Math.ceil(SONGS.length / Math.min(MAX_REELS, Math.ceil(SONGS.length / REEL_SONGS)));
+const reels = () => [...$('reels').children];
+
 function renderSelect() {
-  const car = $('carousel');
-  if (car.children.length !== SONGS.length) {
-    car.innerHTML = '';
-    SONGS.forEach((s, i) => {
-      const b = document.createElement('button');
-      b.className = 'cover';
-      b.type = 'button';
-      b.setAttribute('role', 'option');
-      b.setAttribute('aria-label', s.title);
-      b.innerHTML = `<img src="${s.cover}" alt="">`;
-      b.addEventListener('click', () => (i === selIndex ? startGame({ mode: 'mic' }) : select(i)));
-      car.appendChild(b);
-    });
+  const box = $('reels');
+  if (box.querySelectorAll('.cover').length !== SONGS.length) {
+    const size = reelSize();
+    box.innerHTML = '';
+    reelFront = [];
+    for (let start = 0; start < SONGS.length; start += size) {
+      const reel = document.createElement('div');
+      reel.className = 'reel';
+      SONGS.slice(start, start + size).forEach((s, k) => {
+        const b = document.createElement('button');
+        b.className = 'cover';
+        b.type = 'button';
+        b.dataset.i = start + k;
+        b.setAttribute('role', 'option');
+        b.innerHTML = `<img src="${s.cover}" alt="" draggable="false"><span></span>`;
+        b.querySelector('span').textContent = s.title;
+        reel.appendChild(b);
+      });
+      box.appendChild(reel);
+      reelFront.push(0);
+    }
+    box.style.setProperty('--rows', reelFront.length);
   }
   select(selIndex);
   renderSetup();
+}
+
+// Puts each cover on its drum. --o is how many places it sits from the front, wrapped so a reel goes all the way
+// round; `turn` adds a part-turn to one reel while it is being dragged.
+function turnReels(turn) {
+  reels().forEach((reel, r) => {
+    const covers = [...reel.children];
+    const n = covers.length;
+    const front = reelFront[r] + (turn?.reel === r ? turn.by : 0);
+    covers.forEach((el, k) => {
+      let o = k - front;
+      o -= n * Math.round(o / n);
+      // A cover that went round the back jumps instead of sliding across the front.
+      el.classList.toggle('jump', Math.abs(o - (+el.style.getPropertyValue('--o') || 0)) > n / 2);
+      el.style.setProperty('--o', o);
+      el.style.setProperty('--abs', Math.abs(o));
+      el.style.zIndex = 10 - Math.round(Math.abs(o));
+      el.toggleAttribute('data-far', Math.abs(o) > 2.5);
+      const sel = +el.dataset.i === selIndex;
+      el.classList.toggle('sel', sel);
+      el.setAttribute('aria-selected', sel);
+    });
+  });
+}
+
+// Turns reel r by `step` places and picks the song that comes to the front.
+function spinReel(r, step) {
+  const n = reels()[r].children.length;
+  select(r * reelSize() + (((reelFront[r] + step) % n) + n) % n);
 }
 
 function select(i) {
   selIndex = (i + SONGS.length) % SONGS.length;
   settings.song = selIndex;
   saveSettings();
-  const n = SONGS.length;
-  [...$('carousel').children].forEach((el, k) => {
-    let o = k - selIndex;
-    if (o > n / 2) o -= n;
-    if (o < -n / 2) o += n;
-    el.style.setProperty('--o', o);
-    el.style.setProperty('--abs', Math.abs(o));
-    el.classList.toggle('sel', o === 0);
-    el.setAttribute('aria-selected', o === 0);
-    el.toggleAttribute('data-far', Math.abs(o) > 1);
-  });
+  reelFront[Math.floor(selIndex / reelSize())] = selIndex % reelSize();
+  turnReels();
   const song = SONGS[selIndex];
   setTheme(song);
   setStage(song.stage);
@@ -238,6 +277,55 @@ function renderSongInfo() {
   remove.textContent = 'Remove';
   delete remove.dataset.armed;
 }
+
+// Click a cover to bring it to the front; click the front one to sing it. Drag or swipe a reel sideways to spin it,
+// and whatever lands in front is picked.
+let reelDrag = null;
+$('reels').addEventListener('pointerdown', (e) => {
+  const reel = e.target.closest('.reel');
+  if (!reel || e.button) return;
+  reelDrag = { reel: reels().indexOf(reel), x: e.clientX, id: e.pointerId, by: 0, moved: false, step: reel.firstChild.offsetWidth * 1.05 };
+});
+window.addEventListener('pointermove', (e) => {
+  if (reelDrag?.id !== e.pointerId) return;
+  const dx = e.clientX - reelDrag.x;
+  if (!reelDrag.moved && Math.abs(dx) < 8) return;
+  reelDrag.moved = true;
+  $('reels').classList.add('spinning');
+  reelDrag.by = -dx / reelDrag.step;
+  turnReels(reelDrag);
+});
+const endReelDrag = (e) => {
+  if (reelDrag?.id !== e.pointerId) return;
+  const d = reelDrag;
+  reelDrag = null;
+  $('reels').classList.remove('spinning');
+  if (!d.moved) return;
+  // The click that follows this release is part of the drag, not a pick.
+  $('reels').dataset.dragged = '1';
+  setTimeout(() => delete $('reels').dataset.dragged, 0);
+  if (e.type === 'pointercancel') return turnReels();
+  spinReel(d.reel, Math.round(d.by));
+};
+window.addEventListener('pointerup', endReelDrag);
+window.addEventListener('pointercancel', endReelDrag);
+$('reels').addEventListener('click', (e) => {
+  const cover = e.target.closest('.cover');
+  if (!cover || $('reels').dataset.dragged) return;
+  const i = +cover.dataset.i;
+  i === selIndex ? startGame({ mode: 'mic' }) : select(i);
+});
+// A sideways swipe on a trackpad (or shift + wheel) spins the reel under it; an up-down wheel still scrolls the page.
+let reelWheel = 0;
+$('reels').addEventListener('wheel', (e) => {
+  const reel = e.target.closest('.reel');
+  if (!reel || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+  e.preventDefault();
+  reelWheel += e.deltaX;
+  if (Math.abs(reelWheel) < 40) return;
+  spinReel(reels().indexOf(reel), Math.sign(reelWheel));
+  reelWheel = 0;
+}, { passive: false });
 
 function renderSetup() {
   const turns = settings.mode === 'turns';
@@ -1369,8 +1457,11 @@ document.addEventListener('keydown', (e) => {
   const screen = document.body.dataset.screen;
   if (screen === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); enterSelect(); }
   else if (screen === 'select') {
-    if (e.key === 'ArrowLeft') select(selIndex - 1);
-    else if (e.key === 'ArrowRight') select(selIndex + 1);
+    // Left and right spin the reel you're on; up and down move to the song in front on the reel above or below.
+    const r = Math.floor(selIndex / reelSize());
+    const to = r + (e.key === 'ArrowDown') - (e.key === 'ArrowUp');
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') spinReel(r, e.key === 'ArrowLeft' ? -1 : 1);
+    else if (to !== r && reels()[to]) { e.preventDefault(); select(to * reelSize() + reelFront[to]); }
     else if (e.key === 'Enter' && e.target === document.body) startGame({ mode: 'mic' });
   } else if (screen === 'game' && (e.key === 'Escape' || e.key === 'p')) {
     $('pause').hidden ? pause() : resume();
