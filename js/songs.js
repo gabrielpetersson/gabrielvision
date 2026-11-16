@@ -37,6 +37,11 @@ export const SONGS = [
 
 const LANGUAGES = new Intl.DisplayNames(['en'], { type: 'language' });
 
+// Every upload's chart says which importer made it (chart.version). Raise this whenever a change to the importer would
+// make a song come out differently: uploads made before then offer to be remade each time they are picked.
+export const IMPORT_VERSION = 1;
+export const isOutdated = (song) => !!song.user && (song.chartData?.version ?? 0) < IMPORT_VERSION;
+
 // A stored upload as a song entry; its tracks and art are served from object URLs.
 export function userSong(rec) {
   return {

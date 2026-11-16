@@ -11,12 +11,14 @@ const MODELS = {
     lib: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2',
     id: 'onnx-community/whisper-large-v3-turbo_timestamped',
     dtype: { encoder_model: 'q4f16', decoder_model_merged: 'q4f16' },
+    encoder: 'onnx/encoder_model_q4f16.onnx',
     generate: {},
   },
   wasm: {
     lib: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1',
     id: 'onnx-community/whisper-base_timestamped',
     dtype: { encoder_model: 'q8', decoder_model_merged: 'q8' },
+    encoder: 'onnx/encoder_model_quantized.onnx',
     generate: { no_repeat_ngram_size: 4 },
   },
 };
@@ -25,12 +27,15 @@ const post = (stage, value) => postMessage({ type: 'progress', stage, value });
 
 async function loadAsr({ pipeline }, device) {
   const files = new Map();
-  const { id, dtype } = MODELS[device];
+  const { id, dtype, encoder } = MODELS[device];
+  // transformers.js reports the same progress for a stored model as for a download, so a model already in its cache
+  // reports none: the upload screen only shows real downloads.
+  const stored = await caches.open('transformers-cache').then((c) => c.match(`https://huggingface.co/${id}/resolve/main/${encoder}`)).catch(() => null);
   return pipeline('automatic-speech-recognition', id, {
     device,
     dtype,
     progress_callback: (p) => {
-      if (p.status !== 'progress' || !p.total) return;
+      if (stored || p.status !== 'progress' || !p.total) return;
       files.set(p.file, p);
       const all = [...files.values()];
       post('model', all.reduce((s, f) => s + f.loaded, 0) / all.reduce((s, f) => s + f.total, 0));

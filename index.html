@@ -1,239 +1,295 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' blob: data:; media-src 'self' blob: data:; connect-src 'self' blob: data: https://gabrielvision-rooms.deadblock.workers.dev http://localhost:8787 https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Gabriel Singing Contest</title>
-  <meta name="description" content="A karaoke singing game in your browser. Sing into your mic, hit the notes, beat your friends.">
-  <meta name="theme-color" content="#06070D">
-  <meta property="og:title" content="Gabriel Singing Contest">
-  <meta property="og:description" content="Sing into your mic. Hit every note. Beat your friends.">
-  <meta property="og:image" content="img/stage-title.jpg">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%2306070D'/%3E%3Cpath d='M32 12a10 10 0 0 1 10 10v10a10 10 0 0 1-20 0V22a10 10 0 0 1 10-10z' fill='%23FFD66B'/%3E%3Cpath d='M18 32a14 14 0 0 0 28 0M32 46v8' stroke='%23FFD66B' stroke-width='4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@600;800;900&family=Archivo+Black&family=Archivo:wght@600;800&display=swap">
-  <link rel="stylesheet" href="css/app.css">
-  <link rel="preload" as="image" href="img/stage-title.jpg">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gabriel Singing Contest</title>
+<meta name="description" content="A karaoke singing game in your browser. Sing into your mic, hit the notes, beat your friends.">
+<meta name="theme-color" content="#20c997">
+<meta property="og:title" content="Gabriel Singing Contest">
+<meta property="og:description" content="Sing into your mic. Hit every note. Beat your friends.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23fffef9%27/%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2720%27 fill=%27%23141414%27/%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%277%27 fill=%27%23ff5d3b%27/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-  <div id="bg" aria-hidden="true">
-    <div class="bg-img" id="bgA"></div>
-    <div class="bg-img" id="bgB"></div>
-    <div class="beams"><i></i><i></i><i></i><i></i></div>
-    <div class="shade"></div>
-  </div>
-  <canvas id="stage" aria-hidden="true"></canvas>
-  <canvas id="fx" aria-hidden="true"></canvas>
+<div class="field">
+<main class="device" id="device" data-screen="title">
+  <i class="screw tl"></i><i class="screw tr"></i><i class="screw bl"></i><i class="screw br"></i>
 
-  <!-- Title: a turntable seen from above; grab the record and scratch it -->
-  <section class="screen" id="title-screen">
-    <div class="deck">
-      <div class="deck-left">
-        <h1 class="vlogo">Gabriel<br>Singing<br>Contest</h1>
-        <button class="sticker" id="btn-start" type="button" style="--r: -3deg"><span>Sing alone</span></button>
-        <button class="sticker sun" id="btn-friends" type="button" style="--r: 2deg"><span>Sing with friends</span><small id="friends-note"></small></button>
-        <p class="vhint">Best with headphones</p>
+  <header class="rail">
+    <div class="rail__l">
+      <span class="brand">Gabriel Singing Contest</span>
+      <span class="jackwrap"><i class="jack" aria-hidden="true"></i><span class="silk">Best with headphones</span></span>
+    </div>
+    <div class="rail__r">
+      <ol class="steps" aria-label="Steps">
+        <li><button class="step" type="button" data-step="singers" data-go="singers"><i class="led"></i><span class="silk"><b>1</b><span>Singers</span></span></button></li>
+        <li><button class="step" type="button" data-step="song" data-go="song"><i class="led"></i><span class="silk"><b>2</b><span>Song</span></span></button></li>
+        <li><button class="step" type="button" data-step="settings" data-go="settings"><i class="led"></i><span class="silk"><b>3</b><span>Settings</span></span></button></li>
+      </ol>
+      <div class="conntag"><i class="led led--mint on" aria-hidden="true"></i><span class="silk">Connected</span></div>
+      <div class="restag"><i class="led on" aria-hidden="true"></i><span class="silk">Results</span></div>
+      <div class="playtag"><span class="silk" id="pt-title"></span><span class="chip" id="pt-time"></span></div>
+    </div>
+  </header>
+
+  <!-- 1 · title -->
+  <section class="screen s-title" data-screen="title" tabindex="-1" aria-label="Gabriel Singing Contest">
+    <div class="t-left">
+      <h1 class="wordmark">Gabriel<br>Singing<br>Contest</h1>
+      <div class="grille" aria-hidden="true"></div>
+      <div class="t-keys">
+        <button class="key key--sun key--xl key--title" type="button" data-go="singers"><span class="top">Sing</span></button>
       </div>
-      <div class="platter" id="platter">
-        <canvas id="rec"></canvas>
-        <svg class="arm" viewBox="0 0 200 300" aria-hidden="true"><circle cx="165" cy="36" r="26" fill="#141414" /><path d="M165 36 L120 240 L92 268" stroke="#141414" stroke-width="12" fill="none" stroke-linecap="round" /><rect x="70" y="256" width="40" height="22" rx="4" fill="#141414" transform="rotate(35 90 267)" /></svg>
+    </div>
+    <div class="deck" aria-hidden="true">
+      <div class="platter">
+        <div class="record"><div class="record__label"><svg viewBox="0 0 100 100"><defs><path id="lbl" d="M50 50 m-33 0 a33 33 0 1 1 66 0 a33 33 0 1 1 -66 0"/></defs>
+          <text font-family="Archivo" font-weight="800" font-size="7.4" fill="#141414"><textPath href="#lbl" textLength="203" lengthAdjust="spacing">GABRIEL SINGING CONTEST · SIDE A · </textPath></text>
+          <circle cx="50" cy="50" r="4.5" fill="#fffef9"/></svg></div></div>
+        <div class="record__sheen"></div>
       </div>
+      <svg class="arm" viewBox="0 0 100 100">
+        <g class="arm__g swing">
+          <rect x="88.4" y="2.2" width="6.6" height="6" rx="1.4" fill="#2b2a27" transform="rotate(23 91.7 5.2)"/>
+          <line x1="91.4" y1="7" x2="69.4" y2="58" stroke="#aaa391" stroke-width="2.3" stroke-linecap="round"/>
+          <line x1="91" y1="6.8" x2="69" y2="57.8" stroke="#f5f2e8" stroke-width=".6" stroke-linecap="round"/>
+          <g transform="translate(69.4 58) rotate(23)"><rect x="-2.7" y="-1.2" width="5.4" height="8.4" rx="1" fill="#1b1b1a"/><rect x="-.6" y="6.6" width="1.2" height="1.8" fill="#8a8475"/></g>
+        </g>
+        <circle cx="88" cy="14" r="6.6" fill="#e8e2d2"/><circle cx="88" cy="14" r="6.6" fill="none" stroke="#c6bea8" stroke-width=".5"/><circle cx="88" cy="14" r="2.7" fill="#2b2a27"/>
+      </svg>
+      <div class="deck__speed"><i class="led led--mint on"></i><span class="silk">33⅓</span></div>
     </div>
   </section>
 
-  <!-- Song select + setup -->
-  <section class="screen vinyl" id="select-screen" hidden>
-    <header class="topbar">
-      <button class="icon-btn" id="btn-home" type="button" aria-label="Back to title">
-        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
-      </button>
-      <div class="mini-logo">Gabriel <b>Singing Contest</b></div>
-      <nav class="steps-nav" id="steps-nav" aria-label="Steps">
-        <button type="button" data-step="singers"><i>1</i>Singers</button><button type="button" data-step="song"><i>2</i>Song</button><button type="button" data-step="play"><i>3</i>Play</button>
-      </nav>
-      <button class="btn-upload" id="btn-add-song" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Upload song
-      </button>
-    </header>
-    <div class="step-pane" data-pane="singers">
-      <div class="card pane-card">
-        <h2>Who's singing?</h2>
-        <div id="player-rows"></div>
-        <button class="btn-ghost" id="btn-add-player" type="button">+ Add a singer</button>
-        <div class="seg" id="seg-mode" role="radiogroup" aria-label="How you sing">
-          <button type="button" data-v="together">Together</button><button type="button" data-v="turns">Take turns</button>
-        </div>
-        <button class="btn-primary" type="button" data-next="song">Next</button>
+  <!-- 2 · singers -->
+  <section class="screen s-singers" data-screen="singers" tabindex="-1" aria-labelledby="h-singers">
+    <h2 class="sr" id="h-singers">Who's singing</h2>
+    <div class="invite">
+      <button class="key key--invite" type="button" id="invite-btn" aria-live="polite"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1.2 1.2M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1.2-1.2"/></svg><span>Copy link to invite online friends</span></span></button>
+    </div>
+    <div class="rack">
+      <div class="rack__head silk" aria-hidden="true"><span>Ch</span><span></span><span>Singer</span><span>Mic</span><span></span></div>
+      <ol id="singer-rows"></ol>
+    </div>
+    <div class="panel">
+      <span class="silk" id="l-mode">Mode</span>
+      <div class="slide" id="mode" role="radiogroup" aria-labelledby="l-mode" style="--n:2">
+        <label class="slide__opt"><input type="radio" name="mode" value="together"><span>Together</span></label>
+        <label class="slide__opt"><input type="radio" name="mode" value="turns"><span>Take turns</span></label>
+        <div class="slide__track"><span class="slide__slot"></span><span class="slide__thumb"></span></div>
+        <div class="slide__subs"><span class="silk">Max 2 mics here</span><span class="silk">In turn · 2 lines each</span></div>
       </div>
     </div>
-    <div class="step-pane" data-pane="song">
-      <div class="picker">
-        <div class="reels" id="reels" role="listbox" aria-label="Songs"></div>
-        <div class="song-info">
-          <h2 id="song-title"></h2>
-          <p class="credit" id="song-credit"></p>
-          <p class="best" id="song-best"></p>
-        </div>
-        <div class="song-actions">
-          <button class="btn-ghost" id="btn-remove-song" type="button" hidden>Remove</button>
-        </div>
-      </div>
-      <button class="btn-primary pane-next" type="button" data-next="play">Next</button>
-    </div>
-    <div class="step-pane" data-pane="play">
-      <div class="card pane-card">
-        <h2 id="play-title"></h2>
-        <div class="field">
-          <span class="field-label">Difficulty</span>
-          <div class="seg" id="seg-difficulty" role="radiogroup" aria-label="Difficulty">
-            <button type="button" data-v="easy">Easy</button><button type="button" data-v="normal">Normal</button><button type="button" data-v="hard">Hard</button>
-          </div>
-        </div>
-        <div class="field">
-          <span class="field-label">Original vocal</span>
-          <div class="seg" id="seg-guide" role="radiogroup" aria-label="Original vocal volume">
-            <button type="button" data-v="off">Off</button><button type="button" data-v="soft">Soft</button><button type="button" data-v="full">Full</button>
-          </div>
-        </div>
-        <label class="field-row words-check">
-          <span class="switch"><input type="checkbox" id="opt-lyrics"><span class="knob"></span></span>
-          <span><span class="field-label">Check the words</span><span class="field-note" id="lyrics-status"></span></span>
-        </label>
-        <button class="btn-primary" id="btn-sing" type="button">Sing</button>
-      </div>
-    </div>
+    <nav class="navrail">
+      <button class="key key--sq" type="button" data-back aria-label="Back"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span></button>
+      <span class="silk">Back</span>
+      <button class="key key--sun key--l" type="button" data-go="song"><span class="top">Next<svg class="g" viewBox="0 0 24 24"><path d="M5 12h13M13 6.5l5.5 5.5-5.5 5.5"/></svg></span></button>
+    </nav>
   </section>
 
-  <!-- Room: sing with friends, each on their own device -->
-  <section class="screen vinyl" id="room-screen" hidden>
-    <header class="topbar">
-      <button class="icon-btn" id="btn-room-home" type="button" aria-label="Leave the room">
-        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
-      </button>
-    </header>
-    <div class="lobby">
-      <button class="btn-invite" id="btn-invite" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" /><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /></svg>
-        <span id="invite-label">Copy invite link</span>
-      </button>
-      <div class="people-row">
-        <label class="person me" id="room-me"><span class="dot" id="room-level"></span><input type="text" id="room-name" maxlength="18" autocomplete="nickname" aria-label="Your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" /></svg></label>
-        <ul id="room-people"></ul>
-      </div>
-      <div class="song-list" id="room-songs" role="radiogroup" aria-label="Songs"></div>
-      <div class="seg" id="room-mode" role="radiogroup" aria-label="How you sing">
-        <button type="button" data-v="together">Together</button><button type="button" data-v="turns">Take turns</button>
-      </div>
-      <button class="btn-primary" id="btn-room-start" type="button">Start</button>
-      <p class="room-status" id="room-status"></p>
+  <!-- 3 · song -->
+  <section class="screen s-song" data-screen="song" tabindex="-1" aria-labelledby="h-song">
+    <h2 class="sr" id="h-song">Pick a song</h2>
+    <div class="lcd" id="lcd-song" aria-live="polite"><div class="lcd__screen"></div><div class="lcd__drop">Drop to add song</div></div>
+    <div class="enc" id="enc-song" role="slider" tabindex="0" aria-label="Song" aria-valuemin="1">
+      <svg class="enc__ticks" viewBox="0 0 200 200" aria-hidden="true"></svg>
+      <div class="enc__well"></div>
+      <div class="enc__seat"><div class="enc__knob"><div class="enc__face"><i class="enc__mark"></i></div></div></div>
+      <div class="enc__light"></div>
     </div>
-    <input type="file" id="room-file" hidden>
+    <div class="list">
+      <ol class="tracks" id="tracks-song" aria-label="Songs"></ol>
+      <div class="upload">
+        <button class="key key--m" type="button" id="upload-btn"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M12 16V5M7 9.5 12 4.5l5 5M5 19.5h14"/></svg><span>Upload song</span></span></button>
+      </div>
+    </div>
+    <nav class="navrail">
+      <button class="key key--sq" type="button" data-back aria-label="Back"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span></button>
+      <span class="silk">Back</span>
+      <button class="key key--sun key--l" type="button" data-go="settings"><span class="top">Next<svg class="g" viewBox="0 0 24 24"><path d="M5 12h13M13 6.5l5.5 5.5-5.5 5.5"/></svg></span></button>
+    </nav>
   </section>
 
-  <!-- Gameplay -->
-  <section class="screen" id="game-screen" hidden>
-    <div class="progress"><i id="progress-fill"></i></div>
-    <div class="hud" id="hud"></div>
-    <div class="game-meta">
-      <span id="game-title"></span>
-      <span id="game-time"></span>
-      <button class="icon-btn" id="btn-pause" type="button" aria-label="Pause">
-        <svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12" /></svg>
-      </button>
-    </div>
-    <div id="popups" aria-live="polite"></div>
-    <div class="countdown" id="countdown" hidden></div>
-    <div class="turn-call" id="turn-call" hidden></div>
-    <div class="lyrics" id="lyrics">
-      <p class="line-now" id="line-now"></p>
-      <p class="line-next" id="line-next"></p>
-    </div>
-    <div class="loading" id="loading" hidden><div class="spinner"></div><p id="loading-text">Loading the stage…</p></div>
-  </section>
-
-  <!-- Pause -->
-  <div class="overlay" id="pause" hidden>
-    <div class="pause-card glass">
-      <h3>Paused</h3>
-      <button class="btn-primary" id="btn-resume" type="button">Resume</button>
-      <button class="btn-ghost" id="btn-restart" type="button">Restart song</button>
-      <button class="btn-ghost" id="btn-quit" type="button">Quit to songs</button>
-      <div class="field">
-        <span class="field-label">Mic delay</span>
-        <div class="range-row"><input type="range" id="opt-latency" min="0" max="300" step="10"><output id="latency-out">0 ms</output></div>
-        <p class="field-note">Raise it if your singing scores late even when you're on time.</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Results -->
-  <section class="screen vinyl" id="results-screen" hidden>
-    <div class="results-grid">
-      <div class="board">
-        <p class="kicker" id="res-kicker">Results</p>
-        <h2 id="res-title"></h2>
-        <ol class="ranking" id="ranking"></ol>
-        <div class="res-actions">
-          <button class="btn-primary" id="btn-back-room" type="button" hidden>Back to the room</button>
-          <button class="btn-primary" id="btn-again" type="button">Sing again</button>
-          <button class="btn-ghost" id="btn-songs" type="button">Pick another song</button>
+  <!-- 4 · settings -->
+  <section class="screen s-settings" data-screen="settings" tabindex="-1" aria-labelledby="h-settings">
+    <h2 class="sr" id="h-settings">Settings</h2>
+    <div class="lcd" id="lcd-set"><div class="lcd__screen"></div></div>
+    <div class="ctrls">
+      <div class="ctrl">
+        <span class="ctrl__l" id="l-diff">Difficulty</span>
+        <div class="slide" id="sw-diff" role="radiogroup" aria-labelledby="l-diff" style="--n:3">
+          <label class="slide__opt"><input type="radio" name="diff" value="0"><span>Easy</span></label>
+          <label class="slide__opt"><input type="radio" name="diff" value="1"><span>Normal</span></label>
+          <label class="slide__opt"><input type="radio" name="diff" value="2"><span>Hard</span></label>
+          <div class="slide__track"><span class="slide__slot"></span><span class="slide__thumb"></span></div>
         </div>
-        <div class="leaderboard glass" id="leaderboard"></div>
       </div>
-      <div class="coach glass" id="coach"></div>
+      <div class="ctrl">
+        <span class="ctrl__l" id="l-vocal">Original vocal</span>
+        <div class="slide" id="sw-vocal" role="radiogroup" aria-labelledby="l-vocal" style="--n:3">
+          <label class="slide__opt"><input type="radio" name="vocal" value="0"><span>Off</span></label>
+          <label class="slide__opt"><input type="radio" name="vocal" value="1"><span>Soft</span></label>
+          <label class="slide__opt"><input type="radio" name="vocal" value="2"><span>Full</span></label>
+          <div class="slide__track"><span class="slide__slot"></span><span class="slide__thumb"></span></div>
+        </div>
+      </div>
+      <div class="ctrl ctrl--latch">
+        <span class="ctrl__l" id="l-words">Check the words</span>
+        <div class="latch">
+          <button class="key key--sq key--latch" type="button" role="switch" id="latch-words" aria-labelledby="l-words" aria-checked="true"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M5.5 12.5 10 17l8.5-9.5"/></svg></span></button>
+          <span class="latch__state"><i class="led led--mint" id="words-led"></i><span id="words-state">On</span></span>
+        </div>
+      </div>
     </div>
+    <nav class="navrail">
+      <button class="key key--sq" type="button" data-back aria-label="Back"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span></button>
+      <span class="silk">Back</span>
+      <span class="silk sing-note" id="sing-note" aria-live="polite"></span>
+      <button class="key key--sun key--sing" type="button" id="sing"><span class="top">Sing</span></button>
+    </nav>
   </section>
 
-  <!-- Your name, asked before your first room -->
-  <div class="overlay vinyl" id="name-ask" hidden>
-    <form class="import-card glass name-card" id="name-form" role="dialog" aria-modal="true" aria-labelledby="name-title">
-      <div class="import-head">
-        <h3 id="name-title">What's your name?</h3>
-        <button class="icon-btn" id="name-close" type="button" aria-label="Close">
-          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
-        </button>
-      </div>
-      <input type="text" id="name-input" maxlength="18" autocomplete="nickname" aria-labelledby="name-title">
-      <button class="btn-primary" id="name-go" type="submit" disabled>Join</button>
-    </form>
-  </div>
-
-  <!-- Add your own song -->
-  <div class="overlay vinyl" id="import" hidden>
-    <div class="import-card glass" role="dialog" aria-modal="true" aria-labelledby="import-title">
-      <div class="import-head">
-        <h3 id="import-title">Add your own song</h3>
-        <button class="icon-btn" id="import-close" type="button" aria-label="Close">
-          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
-        </button>
-      </div>
-      <div id="import-pick" class="import-body">
-        <label class="drop" id="drop">
-          <input type="file" id="import-file">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l11-2v12" /><circle cx="6" cy="18" r="3" /><circle cx="17" cy="16" r="3" /></svg>
-          <b id="drop-title">Drop a song here</b>
-          <span id="drop-note">or click to choose one. Any audio or video file with singing.</span>
-        </label>
-        <details class="lyrics-box">
-          <summary>Paste the lyrics (optional)</summary>
-          <textarea id="import-lyrics" rows="7" placeholder="One line per row"></textarea>
-        </details>
-        <p class="field-note" id="import-where"></p>
-        <button class="btn-primary" id="import-go" type="button" disabled>Make it singable</button>
-      </div>
-      <div id="import-run" class="import-body" hidden>
-        <p class="import-file" id="import-file-label"></p>
-        <ol class="steps" id="import-steps"></ol>
-        <p class="field-note" id="import-run-note"></p>
-        <button class="btn-ghost" id="import-cancel" type="button">Cancel</button>
+  <!-- 5 · guest: what a friend sees on their own phone -->
+  <section class="screen s-guest" data-screen="guest" tabindex="-1" aria-labelledby="h-guest">
+    <div class="g-me">
+      <h2 class="g-room" id="h-guest"></h2>
+      <div class="rack">
+        <div class="rack__head silk" aria-hidden="true"><span>Ch</span><span></span><span>Singer</span><span>Mic</span></div>
+        <ol id="guest-row"></ol>
       </div>
     </div>
-  </div>
+    <div class="g-stage">
+      <div class="lcd" id="lcd-guest" aria-live="polite"><div class="lcd__screen"></div></div>
+      <div class="g-mode"><span class="silk">Mode</span>
+        <span class="g-ind" data-mode="together"><i class="led"></i>Together</span>
+        <span class="g-ind" data-mode="turns"><i class="led"></i>Take turns</span>
+      </div>
+      <p class="g-send" id="guest-send" hidden><span class="silk" id="guest-send-l"></span><span class="xfer" id="guest-xfer"></span></p>
+      <p class="g-wait"><i class="led blink on" aria-hidden="true"></i><span id="guest-wait"></span></p>
+    </div>
+    <nav class="navrail">
+      <button class="key key--sq" type="button" data-back aria-label="Leave room"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span></button>
+      <span class="silk">Leave</span>
+    </nav>
+  </section>
 
-  <div class="toast" id="toast" role="alert" hidden></div>
+  <!-- the song: note highway on the display, singers as channel readouts -->
+  <section class="screen s-game" data-screen="game" tabindex="-1" aria-labelledby="h-game">
+    <h2 class="sr" id="h-game">Singing</h2>
+    <div class="lcd lcd--hw">
+      <div class="hw__prog" aria-hidden="true"><i id="hw-prog"></i></div>
+      <div class="hw__stage"><canvas class="hw__cv" id="hw" aria-hidden="true"></canvas><div class="hw__call" id="hw-call" aria-live="assertive"></div></div>
+      <div class="hw__lyr" id="hw-lyr" aria-live="off"><p class="hw__now" id="ly-now"></p><p class="hw__next" id="ly-next"></p></div>
+    </div>
+    <ol class="chans" id="chans" aria-label="Scores"></ol>
+    <nav class="navrail">
+      <button class="key key--sq" type="button" id="pause-btn" aria-label="Pause"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg></span></button>
+      <span class="silk">Pause</span>
+    </nav>
+  </section>
 
-  <script type="module" src="js/main.js"></script>
+  <!-- pause -->
+  <section class="screen s-pause" data-screen="pause" tabindex="-1" aria-labelledby="h-pause">
+    <h2 class="sr" id="h-pause">Paused</h2>
+    <div class="lcd" id="lcd-pause"><div class="lcd__screen"></div></div>
+    <div class="delay">
+      <div class="delay__head"><label class="ctrl__l" for="delay">Mic delay</label><output class="chip" id="delay-out" for="delay"></output></div>
+      <div class="fader">
+        <input type="range" id="delay" min="0" max="300" step="10">
+        <div class="fader__scale silk" aria-hidden="true"><span>0</span><span>100</span><span>200</span><span>300</span></div>
+      </div>
+    </div>
+    <nav class="navrail">
+      <button class="key key--l" type="button" id="quit"><span class="top">Quit to songs</span></button>
+      <button class="key key--l" type="button" id="restart"><span class="top">Restart song</span></button>
+      <button class="key key--sun key--l" type="button" id="resume"><span class="top">Resume</span></button>
+    </nav>
+  </section>
+
+  <!-- upload: pick a file, optional lyrics -->
+  <section class="screen s-upload" data-screen="upload" tabindex="-1" aria-labelledby="h-upload">
+    <h2 class="sr" id="h-upload">Upload song</h2>
+    <div class="upfile"><span class="ctrl__l">File</span>
+    <div class="bay" id="bay" data-state="empty">
+      <i class="led led--mint bay__led" id="bay-led" aria-hidden="true"></i>
+      <svg class="g bay__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M4 14v4.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V14"/></svg>
+      <p class="bay__t" id="bay-t">Drop an audio or video file</p>
+      <p class="silk bay__s" id="bay-s" aria-live="polite"></p>
+      <button class="key key--m" type="button" id="choose"><span class="top">Choose file</span></button>
+    </div></div>
+    <div class="lyr">
+      <div class="lyr__head"><label class="ctrl__l" for="lyrics">Paste the lyrics</label><i class="tag tag--o">Optional</i></div>
+      <textarea class="lyr__ta" id="lyrics" spellcheck="false"></textarea>
+    </div>
+    <nav class="navrail">
+      <button class="key key--sq" type="button" data-back aria-label="Cancel"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span></button>
+      <span class="silk">Cancel</span>
+      <button class="key key--sun key--l" type="button" id="make" disabled><span class="top">Make it singable</span></button>
+    </nav>
+  </section>
+
+  <!-- upload progress -->
+  <section class="screen s-uprog" data-screen="upload-progress" tabindex="-1" aria-labelledby="h-uprog">
+    <h2 class="sr" id="h-uprog">Making it singable</h2>
+    <div class="lcd" id="lcd-up" aria-live="polite"><div class="lcd__screen"></div></div>
+    <ol class="usteps" id="up-steps"></ol>
+    <nav class="navrail">
+      <button class="key key--sq" type="button" data-back aria-label="Cancel"><span class="top"><svg class="g" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg></span></button>
+      <span class="silk">Cancel</span>
+    </nav>
+  </section>
+
+  <!-- an upload made by an older version: remake it, or play it as it is -->
+  <section class="screen s-outdated" data-screen="outdated" tabindex="-1" aria-labelledby="h-outdated">
+    <h2 class="sr" id="h-outdated">Made with an older version</h2>
+    <div class="lcd" id="lcd-outdated"><div class="lcd__screen"></div></div>
+    <nav class="navrail">
+      <button class="key key--l" type="button" id="outdated-play"><span class="top">Play it as it is</span></button>
+      <button class="key key--sun key--l" type="button" id="outdated-remake"><span class="top">Remake it</span></button>
+    </nav>
+  </section>
+
+  <!-- 6 · results -->
+  <section class="screen s-results" data-screen="results" tabindex="-1" aria-labelledby="h-results">
+    <h2 class="sr" id="h-results">Results</h2>
+    <div class="printer">
+      <div class="printer__mouth"><i class="printer__slot"></i></div>
+      <div class="printer__out">
+        <div class="printer__paper" id="paper">
+          <article class="receipt">
+            <header class="rc__head">
+              <p class="rc__brand">Gabriel Singing Contest</p>
+              <p class="rc__song" id="rc-song"></p>
+              <p class="rc__meta" id="rc-meta"></p>
+            </header>
+            <ol class="rc__rows" id="rc-rows"></ol>
+            <footer class="rc__foot"><span id="rc-date"></span><span id="rc-count"></span></footer>
+          </article>
+        </div>
+      </div>
+    </div>
+    <div class="side"><div class="lcd" id="lcd-res"><div class="lcd__screen"></div></div></div>
+    <nav class="navrail">
+      <button class="key key--l" type="button" id="again-pick"><span class="top">Pick another song</span></button>
+      <button class="key key--sun key--l" type="button" id="again"><span class="top">Sing again</span></button>
+    </nav>
+  </section>
+  <p class="toast" id="toast" role="alert" hidden></p>
+</main>
+</div>
+
+<input type="file" id="file" accept="audio/*,video/*" hidden>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="half"><stop offset="50%" stop-color="currentColor"/><stop offset="50%" stop-color="transparent"/></linearGradient>
+    <path id="star" d="M12 2.6l2.85 6.05 6.6.78-4.88 4.53 1.3 6.53L12 17.2l-5.87 3.29 1.3-6.53-4.88-4.53 6.6-.78z"/>
+  </defs>
+</svg>
+
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

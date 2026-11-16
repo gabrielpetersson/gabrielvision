@@ -7,6 +7,7 @@ import { encodeWav } from './wav.js';
 import { readTags } from './tags.js';
 import { accentsFor, makeCover, makeStage } from './art.js';
 import { vocalRegions } from './regions.js';
+import { IMPORT_VERSION } from '../songs.js';
 
 const RATE = 44100;
 const MODEL_URL = new URL('../../models/Kim_Vocal_2.onnx', import.meta.url).href;
@@ -140,6 +141,7 @@ export async function importSong(file, { lyrics = '', server, signal, stage = ()
   const cover = tags.cover || (await makeCover(title, artist, accents));
   const id = `u${Date.now().toString(36)}`;
   chart.id = id;
+  chart.version = IMPORT_VERSION;
   return {
     id,
     title,
@@ -152,5 +154,7 @@ export async function importSong(file, { lyrics = '', server, signal, stage = ()
     vocals: encodeWav([vocals.left.map((x, i) => (x + vocals.right[i]) / 2)], RATE),
     cover,
     stage: await makeStage(cover, accents),
+    // The uploaded file itself, so a newer importer can remake the song later.
+    source: file,
   };
 }
