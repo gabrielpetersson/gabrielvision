@@ -5,6 +5,8 @@ const KEEP = 3; // decoded tracks kept for a restart: the music, the original vo
 
 export class AudioEngine {
   constructor() {
+    /** Audio delay the browser can't see, seconds. */
+    this.delay = 0;
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     this.master = this.ctx.createGain();
     this.master.connect(this.ctx.destination);
@@ -37,9 +39,11 @@ export class AudioEngine {
     return p;
   }
 
-  /** Seconds between scheduling audio and it leaving the speakers. */
+  /** Seconds between scheduling audio and the singer hearing it: what the browser reports, plus the delay it can't
+   * see (Bluetooth headphones), set by the player or learned from their singing (sync.js). Screen, words and the
+   * voice's song time all use it, so they stay together. */
   get outputLatency() {
-    return this.ctx.outputLatency || this.ctx.baseLatency || 0;
+    return (this.ctx.outputLatency || this.ctx.baseLatency || 0) + this.delay;
   }
 
   /** Starts the music and the original vocal together a moment from now, `offset` seconds into the song. Returns the

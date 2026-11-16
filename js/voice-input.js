@@ -30,8 +30,6 @@ export class VoiceInput {
   constructor(engine, source) {
     this.engine = engine;
     this.source = source;
-    /** Extra mic delay the player set, seconds. */
-    this.latency = 0;
     /** @type {Frame[]} frames not yet drained */
     this.frames = [];
     /** @type {Frame[]} the last few seconds, for the trail */
@@ -53,7 +51,7 @@ export class VoiceInput {
     this.input = null;
     // The song's clock, kept here so audio captured before the song stopped still maps to song time (the words check
     // on the last line runs after the music has stopped).
-    /** @type {{ at: number, out: number } | null} */
+    /** @type {{ at: number } | null} */
     this.clock = null;
   }
 
@@ -71,7 +69,7 @@ export class VoiceInput {
   /** The song starts (or restarts after a jump): `at` is the context time of song time 0, maybe already past (a late
    * start). A recording starts playing from that point. @param {number} at */
   start(at) {
-    this.clock = { at, out: this.engine.outputLatency };
+    this.clock = { at };
     if (this.source.kind !== 'recording' || !this.node) return;
     const { ctx } = this.engine;
     this.stopRecording();
@@ -94,7 +92,8 @@ export class VoiceInput {
     const c = this.clock;
     if (!c) return ctxTime;
     if (this.source.kind === 'recording') return ctxTime - c.at;
-    return ctxTime - this.deviceLatency - this.latency - c.at - c.out;
+    // The output delay is read live: the audio delay can change mid-song (sync.js).
+    return ctxTime - this.deviceLatency - c.at - this.engine.outputLatency;
   }
 
   /** @param {{ type: 'pcm', t0: number, rate: number, data: Float32Array } | { type: 'pitch', frames: Float32Array }} msg */

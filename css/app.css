@@ -395,6 +395,8 @@ img { display: block; }
 .s-pause > .lcd, .s-uprog > .lcd { grid-area: lcd; }
 .lcd .segbar { margin-top: 14px; }
 .delay { grid-area: ctrls; display: grid; gap: 14px; max-width: 520px; }
+.seek { display: grid; gap: 14px; padding-bottom: 10px; }
+.seek[hidden] { display: none; }
 .delay__head { display: flex; align-items: center; justify-content: space-between; }
 .fader { --nub: 58px; display: grid; gap: 6px; }
 .fader input { -webkit-appearance: none; appearance: none; width: 100%; height: 46px; margin: 0; background: transparent; cursor: pointer; border-radius: 12px; }

@@ -1,6 +1,7 @@
 // @ts-check
 import { AudioEngine } from './audio-engine.js';
 import { VoiceInput, openMic } from './voice-input.js';
+import { AutoDelay, MAX_DELAY } from './sync.js';
 import { Performance, DIFFICULTY } from './scoring.js';
 import { StageRenderer, shownPitch } from './renderer.js';
 import { LyricChecker, lyricMatch } from './lyric-check.js';
@@ -57,7 +58,9 @@ function loadSettings() {
     guide: GUIDES.includes(s.guide) ? s.guide : 'soft',
     speakers: s.speakers === true,
     lyrics: s.lyrics !== false,
-    latency: clamp(Math.round(+s.latency || 0), 0, 300),
+    // The audio delay (ms): learned from the singing unless the player sets it by hand.
+    delay: clamp(Math.round(+s.delay || 0), 0, MAX_DELAY * 1000),
+    autoDelay: s.autoDelay !== false,
     songId: typeof s.songId === 'string' ? s.songId : SONGS[0].id,
   };
 }
@@ -80,7 +83,10 @@ window.__gv = { results: null, status: 'boot' };
 const device = $('device');
 
 function ensureEngine() {
-  engine ||= new AudioEngine();
+  if (!engine) {
+    engine = new AudioEngine();
+    engine.delay = settings.delay / 1000;
+  }
   const e = engine;
   return e.resume().then(() => e);
 }
@@ -724,14 +730,15 @@ function renderGuest(update) {
 
 // ---------- Game ----------
 /** A singer in a game: someone on this device (scored here) or a friend singing on their own device.
- * @typedef {{ kind: 'here', name: string, color: string, member: string | null, perf: Performance, shown: number }} HereSinger
+ * @typedef {{ kind: 'here', name: string, color: string, member: string | null, owned: Set<number> | null, perf: Performance, shown: number }} HereSinger
  * @typedef {{ kind: 'online', name: string, color: string, member: string, shown: number }} OnlineSinger
  * @typedef {HereSinger | OnlineSinger} Singer */
 /** @typedef {{
  *   start: Start, state: 'starting' | 'playing' | 'ended', song: Song, chart: Chart, inst: AudioBuffer, vocals: AudioBuffer, guide: number,
  *   singers: Singer[], here: HereSinger[], input: VoiceInput | null, voice: { id: string, color: string, frames: Frame[] },
  *   turns: boolean, owners: (number | null)[], difficulty: Difficulty, lyricsOn: boolean, round: number | null,
- *   shownAt: { disp: number | null, t: number }, pendingChecks: number, ui: string, counted: Set<number>, sentAt: number
+ *   shownAt: { disp: number | null, t: number }, pendingChecks: number, ui: string, counted: Set<number>, sentAt: number,
+ *   sync: AutoDelay | null
  * }} Game */
 
 /** Starts a song: on this device (local), on every device in the room at once (room), or with a recording singing
@@ -775,7 +782,7 @@ async function startGame(start) {
       const base = { name: c.name, color: color(c.c), shown: 0 };
       if (!c.here) return { ...base, kind: 'online', member: /** @type {string} */ (c.member) };
       const owned = turns ? new Set(owners.flatMap((o, li) => (o === i ? [li] : []))) : null;
-      return { ...base, kind: 'here', member: c.member, perf: new Performance(chart, difficulty, owned) };
+      return { ...base, kind: 'here', member: c.member, owned, perf: new Performance(chart, difficulty, owned) };
     });
     const here = singers.filter((p) => p.kind === 'here');
     const lyricsOn = here.length > 0 && (start.kind === 'test' ? start.lyrics : settings.lyrics);
@@ -788,7 +795,6 @@ async function startGame(start) {
         : { kind: 'mic', stream: await micStream() });
       if (stale()) return;
       input = new VoiceInput(e, source);
-      input.latency = settings.latency / 1000;
       await input.connect();
       input.enablePcm(lyricsOn);
     }
@@ -803,6 +809,8 @@ async function startGame(start) {
       start, state: 'starting', song, chart, inst, vocals, guide, singers, here, input, voice: { id: 'mic', color: here[0]?.color ?? '#fff', frames: input?.history ?? [] },
       turns, owners, difficulty, lyricsOn, round: start.kind === 'room' ? start.round : null, shownAt: { disp: null, t: 0 },
       pendingChecks: 0, ui: '', counted: new Set(), sentAt: 0,
+      // A live mic learns the audio delay from the singing (a recording has none to learn).
+      sync: input?.source.kind === 'mic' && settings.autoDelay ? new AutoDelay(settings.delay / 1000, chart) : null,
     };
     game = g;
     // A room's song starts at the same moment on every device; a device that is late joins mid-song.
@@ -843,6 +851,24 @@ startGame.token = null;
 function playFrom(g, offset) {
   const at = /** @type {AudioEngine} */ (engine).play({ inst: g.inst, vocals: g.vocals, guide: g.guide, offset });
   g.input?.start(at);
+}
+
+/** Jumps to `t` seconds into the song, playing or paused; never in a room, where everyone's song has to stay in step.
+ * Scoring starts over from there: lines before the jump don't count, so skipping ahead isn't scored as missed.
+ * @param {number} t */
+function seek(t) {
+  const g = game;
+  if (!g || !engine || g.start.kind === 'room' || g.state !== 'playing') return;
+  const to = clamp(t, 0, g.chart.duration - 1);
+  for (const p of g.here) p.perf = new Performance(g.chart, g.difficulty, new Set(g.chart.lines.flatMap((l, i) => (l.end > to && (!p.owned || p.owned.has(i)) ? [i] : []))));
+  // The line's trail, its octave and the delay fit start fresh: their frames belong to the old position.
+  if (g.input) g.input.history.length = 0;
+  g.shownAt = { disp: null, t: 0 };
+  if (g.sync) g.sync.frames.length = 0;
+  const paused = engine.playing?.pausedAt != null;
+  playFrom(g, to);
+  // Paused, the song waits at the new place until Resume.
+  if (paused && engine.playing) engine.playing.pausedAt = to;
 }
 
 /** The layer over the highway: the countdown, loading, and whose turn it is.
@@ -903,6 +929,7 @@ function tick() {
   const tuning = g.chart.tuning ?? 0;
   for (const f of g.input?.drain() ?? []) {
     for (const p of g.here) p.perf.feed(f.t, f.midi);
+    if (g.sync?.observe(f.t, f.midi)) setDelay(g.sync.seconds * 1000, true);
     // Taking turns, the line follows whoever's turn it is; it's drawn against their notes.
     const owner = g.turns ? ownerOf(g, lineAt(g, f.t)) : null;
     const perf = (owner?.kind === 'here' ? owner : g.here[0]).perf;
@@ -1078,8 +1105,27 @@ function renderPause() {
     <div class="lcd__meta"><p class="lcd__title">${esc(g.song.title)}</p>${segbar(now / g.chart.duration)}</div></div>`);
   // A room's song runs on everyone's devices: restarting it here alone would put this device out of step.
   $('restart').hidden = g.start.kind === 'room';
-  /** @type {HTMLInputElement} */ ($('delay')).value = String(settings.latency);
-  $('delay-out').textContent = `${settings.latency} ms`;
+  $('seek-box').hidden = g.start.kind === 'room';
+  /** @type {HTMLInputElement} */ ($('seek')).value = String(Math.round((now / g.chart.duration) * 1000));
+  $('seek-out').textContent = fmtTime(now);
+  $$('#seek-box .fader__scale span').forEach((s, i, all) => (s.textContent = fmtTime((g.chart.duration * i) / (all.length - 1))));
+  showDelay();
+}
+
+/** The audio delay, in ms, for the screen, the words and the voice; kept for the next song. @param {number} ms
+ * @param {boolean} auto learned from the singing (true) or set by hand */
+function setDelay(ms, auto) {
+  settings.delay = Math.round(ms);
+  settings.autoDelay = auto;
+  saveSettings();
+  if (engine) engine.delay = settings.delay / 1000;
+  if (game?.sync && !auto) game.sync = null;
+  showDelay();
+}
+function showDelay() {
+  /** @type {HTMLInputElement} */ ($('delay')).value = String(settings.delay);
+  $('delay-out').textContent = `${settings.delay} ms`;
+  delayMode.set(settings.autoDelay ? 'auto' : 'manual');
 }
 
 // ---------- Results: a printer feeds out a receipt ----------
@@ -1362,12 +1408,16 @@ document.addEventListener('click', (e) => {
 });
 $('file').addEventListener('change', (e) => { const inp = /** @type {HTMLInputElement} */ (e.target); takeFile(inp.files?.[0]); inp.value = ''; });
 $('bay').addEventListener('click', (e) => { if (!(/** @type {Element} */ (e.target)).closest('button')) $('file').click(); });
-$('delay').addEventListener('input', (e) => {
-  settings.latency = Number(/** @type {HTMLInputElement} */ (e.target).value);
-  $('delay-out').textContent = `${settings.latency} ms`;
-  saveSettings();
-  if (game?.input) game.input.latency = settings.latency / 1000;
+// The pause screen's position fader: dragging shows the time, letting go jumps there (the song waits for Resume).
+$('seek').addEventListener('input', (e) => { if (game) $('seek-out').textContent = fmtTime((Number(/** @type {HTMLInputElement} */ (e.target).value) / 1000) * game.chart.duration); });
+$('seek').addEventListener('change', (e) => {
+  if (!game) return;
+  seek((Number(/** @type {HTMLInputElement} */ (e.target).value) / 1000) * game.chart.duration);
+  renderPause();
 });
+$('delay').addEventListener('input', (e) => setDelay(Number(/** @type {HTMLInputElement} */ (e.target).value), false));
+// Auto goes back to learning from the current value at the next song.
+const delayMode = new Slide($('delay-mode'), (v) => setDelay(settings.delay, v === 'auto'));
 
 // Names: typed straight into the channel. A cleared name keeps the last one when you leave the box.
 /** @param {EventTarget | null} t */
@@ -1398,6 +1448,8 @@ document.addEventListener('keydown', (e) => {
   }
   if (t.matches?.('textarea') || e.repeat) return;
   if (screen === 'game' && (e.key === 'Escape' || e.key === 'p')) { e.preventDefault(); pause(); return; }
+  // Left and right jump 10 seconds back or ahead in the song.
+  if (screen === 'game' && engine && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); seek(engine.heardTime() + (e.key === 'ArrowRight' ? 10 : -10)); return; }
   const key = t.closest?.('.key');
   if (key && (e.key === ' ' || e.key === 'Enter')) key.classList.add('is-down');
   if (e.key === 'Escape') { back(); return; }
