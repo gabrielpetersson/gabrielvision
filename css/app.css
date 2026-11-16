@@ -514,6 +514,8 @@ body[data-screen='results'] .bg-img { filter: blur(14px) brightness(0.45); }
 
 /* Add your own song */
 .overlay.vinyl { background: rgba(20, 20, 20, 0.45); backdrop-filter: none; }
+.name-card { width: min(420px, 100%); }
+.vinyl #name-input { padding: 14px 16px; font: 400 22px/1.2 'Archivo Black', sans-serif; }
 .vinyl .drop { border: 3px dashed var(--vink); background: #fff; }
 .vinyl .drop:hover, .vinyl .drop.over { border-color: var(--vink); background: var(--vsun); }
 .vinyl .drop svg { stroke: var(--vink); }

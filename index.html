@@ -181,6 +181,20 @@
     </div>
   </section>
 
+  <!-- Your name, asked before your first room -->
+  <div class="overlay vinyl" id="name-ask" hidden>
+    <form class="import-card glass name-card" id="name-form" role="dialog" aria-modal="true" aria-labelledby="name-title">
+      <div class="import-head">
+        <h3 id="name-title">What's your name?</h3>
+        <button class="icon-btn" id="name-close" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </div>
+      <input type="text" id="name-input" maxlength="18" autocomplete="nickname" aria-labelledby="name-title">
+      <button class="btn-primary" id="name-go" type="submit" disabled>Join</button>
+    </form>
+  </div>
+
   <!-- Add your own song -->
   <div class="overlay vinyl" id="import" hidden>
     <div class="import-card glass" role="dialog" aria-modal="true" aria-labelledby="import-title">

@@ -1134,7 +1134,25 @@ async function connectRoomMic() {
   requestAnimationFrame(tick);
 }
 
-$('btn-friends').addEventListener('click', () => enterRoom(roomInLink() || null));
+// Everyone in a room sees your name, so the first time you go in you pick one. 'Player 1' is the name every
+// browser starts with.
+$('btn-friends').addEventListener('click', () => {
+  if (settings.players[0].name !== 'Player 1') return enterRoom(roomInLink() || null);
+  $('name-go').textContent = roomInLink() ? 'Join' : 'Make a room';
+  $('name-ask').hidden = false;
+  $('name-input').focus();
+});
+$('name-input').addEventListener('input', (e) => { $('name-go').disabled = !e.target.value.trim(); });
+$('name-close').addEventListener('click', () => { $('name-ask').hidden = true; });
+$('name-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('name-input').value.trim();
+  if (!name) return;
+  settings.players[0].name = name;
+  saveSettings();
+  $('name-ask').hidden = true;
+  enterRoom(roomInLink() || null);
+});
 $('btn-room-home').addEventListener('click', leaveRoom);
 $('btn-back-room').addEventListener('click', showRoom);
 $('btn-invite').addEventListener('click', async () => {
@@ -1148,8 +1166,11 @@ $('btn-invite').addEventListener('click', async () => {
   clearTimeout(btn.timer);
   btn.timer = setTimeout(() => { $('invite-label').textContent = 'Copy invite link'; btn.classList.remove('done'); }, 2500);
 });
+// A cleared name box keeps your last name and shows it again when you leave the box.
+$('room-name').addEventListener('blur', (e) => { e.target.value = myName(); });
 $('room-name').addEventListener('input', (e) => {
-  settings.players[0].name = e.target.value.trim() || 'Singer';
+  if (!e.target.value.trim()) return;
+  settings.players[0].name = e.target.value.trim();
   saveSettings();
   room?.send({ name: settings.players[0].name });
 });
@@ -1343,7 +1364,8 @@ $('btn-remove-song').addEventListener('click', async (e) => {
 // ---------- Keyboard ----------
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('import').hidden) return closeImport();
-  if (e.target.matches('input, select, textarea') || !$('import').hidden) return;
+  if (e.key === 'Escape' && !$('name-ask').hidden) return ($('name-ask').hidden = true);
+  if (e.target.matches('input, select, textarea') || !$('import').hidden || !$('name-ask').hidden) return;
   const screen = document.body.dataset.screen;
   if (screen === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); enterSelect(); }
   else if (screen === 'select') {
