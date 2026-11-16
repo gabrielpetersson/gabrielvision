@@ -51,7 +51,7 @@ const store = {
   },
 };
 const settings = Object.assign(
-  { players: [{ name: 'Player 1', deviceId: '' }], mode: 'together', difficulty: 'normal', guide: 'soft', lyrics: true, latency: 0, songId: 'twinkle' },
+  { players: [{ name: 'Player 1', deviceId: '' }], mode: 'together', difficulty: 'normal', guide: 'soft', speakers: false, lyrics: true, latency: 0, songId: 'twinkle' },
   store.get('settings', {}),
 );
 // Member ids of this device's seats in a room live only as long as the room; they are never stored.
@@ -458,10 +458,10 @@ function stopMonitors() {
 async function getStream(i) {
   const want = settings.players[i]?.deviceId || '';
   const have = streams[i];
-  if (have && have.deviceId === want && have.stream.active) return have.stream;
+  if (have && have.deviceId === want && have.speakers === settings.speakers && have.stream.active) return have.stream;
   have?.stream.getTracks().forEach((t) => t.stop());
-  const stream = await openMic(want);
-  streams[i] = { deviceId: want, stream };
+  const stream = await openMic(want, settings.speakers);
+  streams[i] = { deviceId: want, speakers: settings.speakers, stream };
   return stream;
 }
 function micError(err) {
@@ -519,6 +519,7 @@ function renderSettings() {
   const list = catalog(), i = selIndex(list), s = list[i];
   setLcd($('lcd-set'), lcdSong(s, i, list.length));
   setRadio($('sw-diff'), DIFFS.indexOf(settings.difficulty));
+  setRadio($('sw-out'), settings.speakers ? 1 : 0);
   setRadio($('sw-vocal'), GUIDES.indexOf(settings.guide));
   syncWords();
   syncSing();
@@ -1256,6 +1257,13 @@ async function askRemake(song) {
 encSong = makeEncoder($('enc-song'), { count: () => catalog().length, get: () => selIndex(), set: selectSong, onEnter: toSettings });
 initSlide($('mode'), (v) => { setMode(v); connectMonitors(); });
 initSlide($('sw-diff'), (v) => { settings.difficulty = DIFFS[+v]; saveSettings(); if (room?.view?.isHost) room.act('set', { difficulty: settings.difficulty }).catch(() => {}); });
+// Speakers: the mic reopens with echo cancellation at the next song, and the original vocal starts off, since out
+// loud it sings your notes into your mic (turn it back up if you like).
+initSlide($('sw-out'), (v) => {
+  settings.speakers = v === '1';
+  if (settings.speakers) { settings.guide = 'off'; setRadio($('sw-vocal'), 0); }
+  saveSettings();
+});
 initSlide($('sw-vocal'), (v) => { settings.guide = GUIDES[+v]; saveSettings(); });
 
 async function sing() {

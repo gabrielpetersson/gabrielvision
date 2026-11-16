@@ -12,11 +12,14 @@ export async function listMics() {
   return devices.filter((d) => d.kind === 'audioinput');
 }
 
-export async function openMic(deviceId) {
+// With headphones the mic hears only you, so it stays raw. Singing out loud through speakers, the browser's own echo
+// cancellation takes out everything the computer plays ('all', not just call audio; browsers that only know on/off
+// read it as on), the way FaceTime does. Noise suppression and gain control stay off: they flatten held notes.
+export async function openMic(deviceId, speakers) {
   return navigator.mediaDevices.getUserMedia({
     audio: {
       deviceId: deviceId ? { exact: deviceId } : undefined,
-      echoCancellation: false,
+      echoCancellation: speakers ? 'all' : false,
       noiseSuppression: false,
       autoGainControl: false,
       channelCount: 1,
