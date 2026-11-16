@@ -1,7 +1,7 @@
 import { AudioEngine } from './audio-engine.js';
 import { VoiceInput, listMics, openMic } from './voice-input.js';
-import { Performance, DIFFICULTY, foldDiff } from './scoring.js';
-import { StageRenderer } from './renderer.js';
+import { Performance, DIFFICULTY } from './scoring.js';
+import { StageRenderer, shownPitch } from './renderer.js';
 import { LyricChecker, lyricMatch } from './lyric-check.js';
 import { SONGS, loadChart, userSong, releaseSong } from './songs.js';
 import { midiName } from './pitch.js';
@@ -512,7 +512,7 @@ async function startGame(opts) {
       const input = new VoiceInput(engine, await sourceFor(i), { latency: settings.latency / 1000 });
       await input.connect();
       input.enablePcm(lyricsOn);
-      inputs.push({ input, players: [] });
+      inputs.push({ input, players: [], shownAt: { disp: null, t: 0 } });
     }
     // Taking turns: lines go out in pairs, round-robin.
     const owners = chart.lines.map((_, i) => (turns ? Math.floor(i / LINES_PER_TURN) % names.length : null));
@@ -614,12 +614,8 @@ function tick() {
       // With one shared mic, the comet follows whoever owns the line at that moment.
       const shown = g.players.length > 1 ? players[game.owners[lineAt(f.t)]] : g.players[0];
       f.credit = shown.perf.live.credit;
-      if (f.midi == null) f.disp = null;
-      else {
-        const m = f.midi - tuning;
-        const n = shown.perf.live.note || nearestNote(shown.perf, f.t);
-        f.disp = n ? n.p + foldDiff(m, n.p) : center + foldDiff(m, center);
-      }
+      const n = f.midi == null ? null : shown.perf.live.note || nearestNote(shown.perf, f.t);
+      f.disp = shownPitch(f.midi == null ? null : f.midi - tuning, n, center, g.shownAt, f.t);
     }
   }
   for (const p of game.scored) {
@@ -1291,7 +1287,7 @@ const STEPS = [
 const STAGE = {
   read: ['read'], download: ['separate', 'Loading the voice model (a 67 MB download the first time)'], separate: ['separate'],
   upload: ['separate', 'Uploading to our server'], server: ['separate', 'Our server is separating the voice and writing down the words'],
-  pitch: ['lyrics', 'Tracking the melody'], 'pitch-model': ['lyrics', 'Loading the melody model (a 43 MB download the first time)'], 'lyrics-model': ['lyrics', 'Loading the speech model (a 77 MB download the first time)'],
+  pitch: ['lyrics', 'Tracking the melody'], 'pitch-model': ['lyrics', 'Loading the melody model (a 43 MB download the first time)'], 'lyrics-model': ['lyrics', 'Loading the speech model (a large download the first time)'],
   words: ['lyrics', 'Writing down the words'], lyrics: ['lyrics'], notes: ['notes'], save: ['save'],
 };
 let importFile = null;

@@ -60,6 +60,13 @@ export class Yin {
       for (let t = h - 2; t <= h + 2; t++) if (d[t] < d[m]) m = t;
       if (d[m] < d[tau] + 0.04) { tau = m; break; }
     }
+    // A much deeper dip at three times this lag means we caught the voice's third harmonic. That reads as a fifth
+    // off even after octaves fold, so it would cost points on a note sung dead on.
+    if (tau * 3 + 2 <= maxTau) {
+      let m = tau * 3;
+      for (let t = m - 2; t <= tau * 3 + 2; t++) if (d[t] < d[m]) m = t;
+      if (d[m] < d[tau] - 0.1) tau = m;
+    }
     const clarity = 1 - d[tau];
     let better = tau;
     if (tau > minTau && tau < maxTau) {

@@ -145,6 +145,56 @@ function segmentNotes({ m, db, hop, n }, tuning) {
   return notes;
 }
 
+// ---------- Simpler bars ----------
+// Singers read small wiggles as noise. When the voice leaves a pitch briefly and comes back to it (one or two notes
+// a semitone away, or one quick flick of two), those notes take the pitch around them. A step that stays is melody.
+function simplify(notes) {
+  const out = notes.map((n) => ({ ...n }));
+  const touching = (a, b) => b.t - (a.t + a.d) < 0.3;
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (let i = 1; i < out.length - 1; i++) {
+      for (let j = i + 1; j <= Math.min(i + 2, out.length - 1); j++) {
+        const home = out[i - 1].p, away = out.slice(i, j);
+        if (out[j].p !== home || !out.slice(i - 1, j + 1).every((n, k, all) => !k || touching(all[k - 1], n))) continue;
+        const far = Math.max(...away.map((n) => Math.abs(n.p - home)));
+        const long = away.reduce((s, n) => s + n.d, 0);
+        if (far && ((far <= 1 && long < 0.45) || (far <= 2 && away.length === 1 && long < 0.18))) {
+          for (const n of away) n.p = home;
+          changed = true;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// A line's bars as a singer can follow them. A held-vowel bar ("~") that starts after the word has stopped is a run or
+// an echo that sing-along singers skip, so it goes. Bars shorter than MIN_BAR are too quick to hit: one joins the
+// bar it touches (its own word first), or grows into the free time after it. A joined bar takes the pitch the voice
+// holds across both (the short one is often the slide into a note, so neither bar's own pitch is safe).
+const MIN_BAR = 0.15;
+
+function singable(line, heldPitch) {
+  const out = line.filter((n, k) => !(n.syl === '~' && k > 0 && n.t - (line[k - 1].t + line[k - 1].d) > 0.1)).map((n) => ({ ...n }));
+  const touch = (a, b) => b.t - (a.t + a.d) < 0.06;
+  for (let k = 0; k < out.length; k++) {
+    const n = out[k], prev = out[k - 1], next = out[k + 1];
+    if (n.d >= MIN_BAR) continue;
+    const into = prev && !prev.wordEnd && touch(prev, n) ? prev : next && !n.wordEnd && touch(n, next) ? next : prev && touch(prev, n) ? prev : next && touch(n, next) ? next : null;
+    if (!into) {
+      n.d = +Math.max(n.d, Math.min(MIN_BAR, (next ? next.t - 0.03 : Infinity) - n.t)).toFixed(3);
+      continue;
+    }
+    const [a, b] = into === prev ? [prev, n] : [n, next];
+    const syl = a.syl === '~' ? b.syl : b.syl === '~' ? a.syl : a.syl + (a.wordEnd ? ' ' : '') + b.syl;
+    const p = heldPitch(a.t, b.t + b.d) ?? (a.d >= b.d ? a.p : b.p);
+    out.splice(out.indexOf(a), 2, { ...a, d: +(b.t + b.d - a.t).toFixed(3), p, syl, wordEnd: b.wordEnd, spread: Math.max(a.spread, b.spread) });
+    k = -1; // the joined bar can still be short: look again from the start
+  }
+  return out;
+}
+
 // ---------- Words and syllables ----------
 const VOWEL = /[aeiouyæøåäöüéèêëáàâíìîïóòôúùûœ]/i;
 const DIGRAPHS = ['th', 'sh', 'ch', 'ph', 'wh', 'ck', 'ng', 'qu', 'gh'];
@@ -289,8 +339,9 @@ function groupLines(words, pasted) {
     }
     return [...byLine.values()];
   }
-  // Recognised words: choose the breaks that best combine strong boundaries (breaths, held notes,
-  // punctuation) with comfortable line lengths of about four seconds.
+  // Recognised words: choose the breaks that best combine strong boundaries (breaths, punctuation, a capital where
+  // Whisper starts a sung line, held notes) with comfortable line lengths of about four seconds. Sentence cues weigh
+  // most: a long note mid-sentence ("Cause all I~~~ need") is not a line end.
   const W = words.length;
   const durs = words.flatMap((w) => w.notes.map((n) => n.d)).sort((a, b) => a - b);
   const med = durs[durs.length >> 1] || 0.3;
@@ -299,7 +350,7 @@ function groupLines(words, pasted) {
     if (!next) return 0;
     const gap = Math.max(0, next.start - w.end);
     const held = Math.max(0, Math.min(2, (w.notes[w.notes.length - 1].d - med) / med));
-    return 3 * Math.min(gap, 1.5) + 0.8 * held + (/[.!?;:]$/.test(w.text) ? 1.5 : /,$/.test(w.text) ? 0.6 : 0) + (/^\p{Lu}/u.test(next.text) && next.text !== 'I' ? 0.4 : 0);
+    return 3 * Math.min(gap, 1.5) + 0.3 * held + (/[.!?;:]$/.test(w.text) ? 2.5 : /,$/.test(w.text) ? 0.6 : 0) + (/^\p{Lu}/u.test(next.text) && next.text !== 'I' ? 1.5 : 0);
   });
   const lineCost = (j, k) => {
     const dur = words[k].end - words[j].start, n = k - j + 1;
@@ -317,18 +368,22 @@ function groupLines(words, pasted) {
   return lines;
 }
 
-// Joins same-pitch neighbours (closest first) until a word has no more notes than syllables.
+// Joins touching neighbours until a word has no more notes than syllables: same-pitch pairs first, then a short
+// flourish (under 0.2 s, up to two semitones away) folds into the note next to it, which keeps its pitch.
 function mergeWithin(notes, syllables) {
   const out = notes.map((n) => ({ ...n }));
   while (out.length > syllables) {
-    let best = -1, bestGap = 0.08;
+    let best = -1, bestCost = Infinity;
     for (let k = 1; k < out.length; k++) {
-      const gap = out[k].t - (out[k - 1].t + out[k - 1].d);
-      if (out[k].p === out[k - 1].p && gap < bestGap) { bestGap = gap; best = k; }
+      const [a, b] = [out[k - 1], out[k]];
+      const gap = b.t - (a.t + a.d), step = Math.abs(a.p - b.p);
+      if (gap >= 0.08 || (step && (step > 2 || Math.min(a.d, b.d) >= 0.2))) continue;
+      const cost = step + gap;
+      if (cost < bestCost) { bestCost = cost; best = k; }
     }
     if (best < 0) break;
     const a = out[best - 1], b = out[best];
-    out.splice(best - 1, 2, { t: a.t, d: b.t + b.d - a.t, p: a.p, spread: Math.max(a.spread, b.spread) });
+    out.splice(best - 1, 2, { t: a.t, d: b.t + b.d - a.t, p: a.d >= b.d ? a.p : b.p, spread: Math.max(a.spread, b.spread) });
   }
   return out;
 }
@@ -336,7 +391,15 @@ function mergeWithin(notes, syllables) {
 export function buildChart({ pitch, words, lyrics = '', duration, tempo, title, artist = '', language = 'en' }) {
   const frames = toFrames(pitch);
   const tuning = estimateTuning(frames.m);
-  const notes = segmentNotes(frames, tuning);
+  // The note the voice holds most of the time between two song times (null when it is silent there).
+  const heldPitch = (t0, t1) => {
+    const held = frames.m.slice(Math.max(0, Math.round(t0 / frames.hop)), Math.round(t1 / frames.hop) + 1).filter((v) => v != null).map((v) => Math.round(v - tuning));
+    if (!held.length) return null;
+    const count = new Map();
+    for (const p of held) count.set(p, (count.get(p) || 0) + 1);
+    return [...count].sort((x, y) => y[1] - x[1])[0][0];
+  };
+  const notes = simplify(segmentNotes(frames, tuning));
   const { tokens, pasted } = tokensFrom(words, lyrics);
   const assign = alignWords(tokens, notes, language);
 
@@ -368,7 +431,8 @@ export function buildChart({ pitch, words, lyrics = '', duration, tempo, title, 
       });
       w.notes.forEach((n, j) => out.push({ t: +n.t.toFixed(3), d: +n.d.toFixed(3), p: n.p, syl: text[j] ?? '~', wordEnd: j === k - 1, golden: false, spread: n.spread }));
     }
-    return { start: out[0].t, end: +(out[out.length - 1].t + out[out.length - 1].d).toFixed(3), text: ws.map((w) => w.text).join(' '), notes: out };
+    const notes = singable(out, heldPitch);
+    return { start: notes[0].t, end: +(notes[notes.length - 1].t + notes[notes.length - 1].d).toFixed(3), text: ws.map((w) => w.text).join(' '), notes };
   });
 
   // Golden notes: the longest steady notes, about one in fourteen.

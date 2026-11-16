@@ -2,9 +2,9 @@
 // scores every note by how close the voice stays to it. No DOM, no audio — offline tests use it too.
 
 export const DIFFICULTY = {
-  easy: { label: 'Easy', perfect: 0.6, window: 2.0 },
-  normal: { label: 'Normal', perfect: 0.35, window: 1.3 },
-  hard: { label: 'Hard', perfect: 0.2, window: 0.8 },
+  easy: { label: 'Easy', perfect: 0.9, window: 2.6 },
+  normal: { label: 'Normal', perfect: 0.6, window: 2.0 },
+  hard: { label: 'Hard', perfect: 0.3, window: 1.1 },
 };
 
 export const RATINGS = [
@@ -27,6 +27,8 @@ export const TITLES = [
 
 const POINTS_PER_SECOND = 500;
 const HIT_ACCURACY = 0.5;
+// Holding a bar in tune for this share of it is full marks: nobody sings through every consonant, breath and release.
+const HOLD = 0.6;
 // The pitch detector needs ~2/3 of its 64 ms window voiced before it locks on, so onsets read this much late.
 const DETECTOR_LAG = 0.045;
 
@@ -164,7 +166,7 @@ export class Performance {
       this.range.lo = Math.min(this.range.lo, m);
       this.range.hi = Math.max(this.range.hi, m);
     }
-    n.acc = n.frames ? n.credit / n.frames : 0;
+    n.acc = n.frames ? Math.min(1, n.credit / (n.frames * HOLD)) : 0;
     const hit = n.acc >= HIT_ACCURACY;
     if (hit) {
       this.combo++;

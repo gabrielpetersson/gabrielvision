@@ -75,9 +75,9 @@ export async function trackPitch(vocal16k, device, onProgress, signal) {
 }
 
 // The sung words with timings, and the language, from the regions where someone sings.
-export function readWords(vocal16k, { regions, language }, onProgress, signal) {
+export function readWords(vocal16k, device, { regions, language }, onProgress, signal) {
   const audio = vocal16k.slice();
-  return runWorker(new URL('../workers/transcribe-worker.js', import.meta.url), { audio, regions, language }, [audio.buffer], onProgress, signal);
+  return runWorker(new URL('../workers/transcribe-worker.js', import.meta.url), { audio, device, regions, language }, [audio.buffer], onProgress, signal);
 }
 
 // Native resampling: any channels at any rate to mono at `rate`.
@@ -124,7 +124,7 @@ export async function importSong(file, { lyrics = '', server, signal, stage = ()
   stage('lyrics', 0);
   const pitch = await trackPitch(vocal16k, device || 'wasm', stage, signal);
   // The server already wrote down the words.
-  if (!words) ({ words, language } = await readWords(vocal16k, { regions: vocalRegions(pitch.rms, pitch.hop), language }, (s, p) => stage(s === 'model' ? 'lyrics-model' : s, p), signal));
+  if (!words) ({ words, language } = await readWords(vocal16k, device || 'wasm', { regions: vocalRegions(pitch.rms, pitch.hop), language }, (s, p) => stage(s === 'model' ? 'lyrics-model' : s, p), signal));
   stage('lyrics', 1);
 
   stage('notes', 0);

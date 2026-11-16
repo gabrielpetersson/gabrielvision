@@ -1,7 +1,24 @@
 // Canvas renderer for the note highway: scrolling glass note capsules, beat grid, the "now" line,
 // each singer's pitch comet with its trail, and spark particles. Pure drawing — no game rules here.
 
+import { foldDiff } from './scoring.js';
+
 const GOLD = '#FFD66B';
+
+// Where a sung pitch (MIDI, tuning removed) is drawn. Singing a bar's note in any octave puts the line on that bar.
+// Off a bar, the line stays in the octave it was just drawn in, so a steady voice never leaps an octave when the bars
+// change under it, and switching octaves never yanks it. `last` ({ disp, t }) carries that octave between frames.
+const ON_BAR = 1.3;
+export function shownPitch(m, note, center, last, t) {
+  if (m == null) return null;
+  const onNote = note ? note.p + foldDiff(m, note.p) : null;
+  const disp = onNote != null && Math.abs(onNote - note.p) < ON_BAR ? onNote
+    : last.disp != null && t - last.t < 0.4 ? m + 12 * Math.round((last.disp - m) / 12)
+    : onNote ?? center + foldDiff(m, center);
+  last.disp = disp;
+  last.t = t;
+  return disp;
+}
 
 const hexToRgb = (hex) => {
   const n = parseInt(hex.slice(1), 16);
@@ -77,7 +94,7 @@ export class StageRenderer {
     this.pps = Math.max(150, Math.min(440, W * 0.21));
     if (this.chart) {
       this.row = (this.bottom - this.top) / (this.hi - this.lo);
-      this.noteH = Math.max(9, Math.min(30, this.row * 0.8));
+      this.noteH = Math.max(14, Math.min(36, this.row * 1.1));
     }
   }
 
